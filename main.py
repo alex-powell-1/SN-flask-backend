@@ -2,6 +2,8 @@ import flask
 from waitress import serve
 from setup import creds, email_engine, sms_engine
 from jinja2 import Template
+import pandas
+from datetime import datetime
 
 app = flask.Flask(__name__)
 dev = False
@@ -47,15 +49,42 @@ def send_text(first_name, last_name, phone):
         sms.send_text(name=name,
                       to_phone=sms_engine.format_phone(v, prefix=True),
                       message=message,
-                      log_location=creds.design_request_sms_log,
+                      log_location=creds.sms_log,
                       create_log=True)
 
 
-@app.route('/<first_name>&<last_name>&<email>&<phone>')
-def respond(first_name, last_name, email, phone):
+@app.route('/design/<first_name>&<last_name>&<email>&<phone>')
+def get_service_information(first_name, last_name, email, phone):
     send_email(first_name, email)
     send_text(first_name, last_name, phone)
-    return "Submitted"
+    design_lead_data = [[str(datetime.now())[:-7], first_name, last_name, email, phone]]
+    df = pandas.DataFrame(design_lead_data, columns=["date", "first_name", "last_name", "email", "phone"])
+    # Looks for file. If it has been deleted, it will recreate.
+    try:
+        pandas.read_csv(creds.design_request_lead_log)
+    except FileNotFoundError:
+        df.to_csv(creds.lead_log, mode='a', header=True, index=False)
+    else:
+        df.to_csv(creds.lead_log, mode='a', header=False, index=False)
+
+    finally:
+        return f"{creds.service} request for information received!".capitalize()
+
+
+@app.route('/newsletter/<email>')
+def newsletter_signup(email):
+    newsletter_data = [[str(datetime.now())[:-7], email]]
+    df = pandas.DataFrame(newsletter_data, columns=["date", "email"])
+    # Looks for file. If it has been deleted, it will recreate.
+    try:
+        pandas.read_csv(creds.newsletter_log)
+    except FileNotFoundError:
+        df.to_csv(creds.newsletter_log, mode='a', header=True, index=False)
+    else:
+        df.to_csv(creds.newsletter_log, mode='a', header=False, index=False)
+
+    finally:
+        return "Newsletter signup complete!"
 
 
 if __name__ == '__main__':
