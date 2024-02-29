@@ -1,7 +1,7 @@
 import flask
+from flask import request
 from waitress import serve
 from setup import creds, email_engine, sms_engine
-from jinja2 import Template
 import pandas
 from datetime import datetime
 
@@ -12,10 +12,6 @@ dev = False
 def send_email(first_name, email):
     """Send PDF attachment to customer"""
     recipient = {first_name: email}
-    with open("./email_body.html", "r") as file:
-        template_str = file.read()
-
-    jinja_template = Template(template_str)
 
     email_data = {
         "title": creds.email_subject,
@@ -30,13 +26,11 @@ def send_email(first_name, email):
         "company_reviews": creds.company_reviews
     }
 
-    email_content = jinja_template.render(email_data)
-
     email_engine.send_html_email(from_name=creds.company_name,
                                  from_address=creds.gmail_user,
                                  recipients_list=recipient,
                                  subject=creds.email_subject,
-                                 content=email_content)
+                                 content=flask.render_template('email_body.html'))
 
 
 def send_text(first_name, last_name, phone):
@@ -53,26 +47,33 @@ def send_text(first_name, last_name, phone):
                       create_log=True)
 
 
-@app.route('/design/<first_name>&<last_name>&<email>&<phone>')
-def get_service_information(first_name, last_name, email, phone):
+@app.route('/design', methods=["POST"])
+def get_service_information():
+    first_name = request.form.get('first_name')
+    last_name = request.form.get('last_name')
+    email = request.form.get('email')
+    phone = request.form.get('phone')
     send_email(first_name, email)
     send_text(first_name, last_name, phone)
     design_lead_data = [[str(datetime.now())[:-7], first_name, last_name, email, phone]]
     df = pandas.DataFrame(design_lead_data, columns=["date", "first_name", "last_name", "email", "phone"])
     # Looks for file. If it has been deleted, it will recreate.
     try:
-        pandas.read_csv(creds.design_request_lead_log)
+        pandas.read_csv(creds.lead_log)
     except FileNotFoundError:
         df.to_csv(creds.lead_log, mode='a', header=True, index=False)
     else:
         df.to_csv(creds.lead_log, mode='a', header=False, index=False)
 
     finally:
-        return f"{creds.service} request for information received!".capitalize()
+        print(f"{creds.service} request for information received!".capitalize())
+        return ("Your request for information has been received. "
+                "Please check your email for more information from our team.")
 
 
-@app.route('/newsletter/<email>')
-def newsletter_signup(email):
+@app.route('/newsletter', methods=['POST'])
+def newsletter_signup():
+    email = request.form.get('email')
     newsletter_data = [[str(datetime.now())[:-7], email]]
     df = pandas.DataFrame(newsletter_data, columns=["date", "email"])
     # Looks for file. If it has been deleted, it will recreate.
@@ -84,6 +85,7 @@ def newsletter_signup(email):
         df.to_csv(creds.newsletter_log, mode='a', header=False, index=False)
 
     finally:
+        print("Newsletter signup complete!")
         return "Newsletter signup complete!"
 
 
@@ -91,4 +93,6 @@ if __name__ == '__main__':
     if dev:
         app.run(debug=True, port=9999)
     else:
+        print("Flask Server Running")
         serve(app, host='localhost', port=9999)
+
