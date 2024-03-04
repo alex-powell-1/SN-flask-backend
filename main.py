@@ -43,10 +43,12 @@ def send_email(first_name, email):
                                  content=email_content)
 
 
-def send_text(first_name, last_name, phone):
+def send_text(first_name, last_name, phone, interested_in, timeline):
     """Send text message to sales team mangers for customer followup"""
     name = f"{first_name} {last_name}".title()
     message = (f"{name} just requested a phone follow-up about {creds.service}.\n"
+               f"Interested in: {interested_in}\n"
+               f"Timeline: {timeline}\n"
                f"Phone: {sms_engine.format_phone(phone, mode='clickable')}")
     sms = sms_engine.SMSEngine()
     for k, v in creds.lead_recipient.items():
@@ -60,17 +62,25 @@ def send_text(first_name, last_name, phone):
 @app.route('/design', methods=["POST"])
 def get_service_information():
     data = request.json
-
     first_name = data.get('first_name')
     last_name = data.get('last_name')
     email = data.get('email')
     phone = data.get('phone')
+    timeline = data.get('timeline')
+    interested_in = data.get('interested_in')
+
+    interests = ""
+    if interested_in is not None:
+        for x in interested_in:
+            interests += x
+            if len(interested_in) > 1:
+                interests += ", "
 
     send_email(first_name, email)
-    send_text(first_name, last_name, phone)
+    send_text(first_name, last_name, phone, interests, timeline)
 
-    design_lead_data = [[str(datetime.now())[:-7], first_name, last_name, email, phone]]
-    df = pandas.DataFrame(design_lead_data, columns=["date", "first_name", "last_name", "email", "phone"])
+    design_lead_data = [[str(datetime.now())[:-7], first_name, last_name, email, phone, interested_in, timeline]]
+    df = pandas.DataFrame(design_lead_data, columns=["date", "first_name", "last_name", "email", "phone", "interested_in", "timeline"])
 
     # Looks for file. If it has been deleted, it will recreate.
     try:
@@ -84,6 +94,27 @@ def get_service_information():
         print(f"{creds.service} request for information received!".capitalize())
 
     return "Your information has been received. Please check your email for more information from our team."
+
+
+@app.route('/stock_notify', methods=['POST'])
+def stock_notification():
+    """get contact and product information from user who wants notification of when
+    a product comes back into stock"""
+    data = request.json
+    email = data.get('email')
+    item_no = data.get('sku')
+    stock_notification_data = [[str(datetime.now())[:-7], email, item_no]]
+    df = pandas.DataFrame(stock_notification_data, columns=["date", "email", "item_no"])
+    # Looks for file. If it has been deleted, it will recreate.
+    try:
+        pandas.read_csv(creds.stock_notification_log)
+    except FileNotFoundError:
+        df.to_csv(creds.stock_notification_log, mode='a', header=True, index=False)
+    else:
+        df.to_csv(creds.stock_notification_log, mode='a', header=False, index=False)
+
+    finally:
+        return "OK", 200
 
 
 @app.route('/newsletter', methods=['POST'])
@@ -100,8 +131,7 @@ def newsletter_signup():
         df.to_csv(creds.newsletter_log, mode='a', header=False, index=False)
 
     finally:
-        print("Newsletter signup complete!")
-        return "Newsletter signup complete!"
+        return "OK", 200
 
 
 if __name__ == '__main__':
