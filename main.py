@@ -6,6 +6,8 @@ import pandas
 from datetime import datetime
 from flask_cors import CORS
 from jinja2 import Template
+from flask import Response
+from twilio.twiml.messaging_response import MessagingResponse
 
 app = flask.Flask(__name__)
 CORS(app)
@@ -114,7 +116,7 @@ def stock_notification():
         df.to_csv(creds.stock_notification_log, mode='a', header=False, index=False)
 
     finally:
-        return "OK", 200
+        return "Your submission was received."
 
 
 @app.route('/newsletter', methods=['POST'])
@@ -132,6 +134,13 @@ def newsletter_signup():
 
     finally:
         return "OK", 200
+
+
+@app.route('/sms', methods=['POST'])
+def incoming_sms():
+    data = request.json
+    print(data)
+    return "OK", 200
 
 
 if __name__ == '__main__':
