@@ -1,8 +1,18 @@
 from setup import creds
 from twilio.rest import Client
 from datetime import datetime
+from dateutil import tz
+from setup.query_engine import QueryEngine
+import pytz
 from twilio.base.exceptions import TwilioRestException
 import pandas
+
+est = pytz.timezone('US/Eastern')
+utc = pytz.utc
+fmt = '%Y-%m-%d %H:%M:%S %Z%z'
+FROM_ZONE = tz.gettz('UTC')
+TO_ZONE = tz.gettz('America/New_York')
+
 
 class SMSEngine:
     def __init__(self):
@@ -61,11 +71,89 @@ def format_phone(phone_number, mode="Twilio", prefix=False):
     formatted_phone = formatted_phone.replace(")", "")  # Remove Close Parenthesis
     formatted_phone = formatted_phone.replace("+1", "")  # Remove +1
     formatted_phone = formatted_phone[-10:]  # Get last 10 characters
-    if mode == "clickable":
+    if mode == "counterpoint":
+        # Masking ###-###-####
+        cp_phone = formatted_phone[0:3] + "-" + formatted_phone[3:6] + "-" + formatted_phone[6:10]
+        return cp_phone
+
+    elif mode == "clickable":
         # Masking ###-###-####
         clickable_phone = "(" + formatted_phone[0:3] + ") " + formatted_phone[3:6] + "-" + formatted_phone[6:10]
         return clickable_phone
+
     else:
         if prefix:
             formatted_phone = "+1" + formatted_phone
         return formatted_phone
+
+
+def lookup_customer_data(phone):
+    # Format phone for Counterpoint masking ###-###-####
+    cp_phone_input = format_phone(phone, mode="counterpoint")
+    # Create customer variables from tuple return of query_db
+    db = QueryEngine()
+    query = f"""
+        SELECT FST_NAM, LST_NAM, CATEG_COD
+        FROM AR_CUST
+        WHERE PHONE_1 = '{format_phone(phone, mode="counterpoint")}'
+        """
+    response = db.query_db(query)
+    if response is not None:
+        first_name = response[0][0]
+        last_name = response[0][1]
+        full_name = first_name + " " + last_name
+        category = response[0][2]
+        # For people with no phone in our database
+    else:
+        full_name = "Unknown"
+        category = "Unknown"
+
+    return full_name, category
+
+
+def write_all_twilio_messages_to_share():
+    """Gets all messages from twilio API and writes to .csv on share drive"""
+    client = Client(creds.twilio_account_sid, creds.twilio_auth_token)
+    messages = client.messages.list(to=creds.twilio_phone_number)
+
+    # Empty List
+    message_list = []
+
+    # Loop through message response in reverse order and format data
+    for record in messages[-1::-1]:
+        customer_name, customer_category = lookup_customer_data(record.from_)
+        # [-1::-1] Twilio supplies data newest to oldest. This reverses that.
+        if record.date_sent is not None:
+            local_datetime = convert_timezone(timestamp=record.date_sent, from_zone=FROM_ZONE, to_zone=TO_ZONE)
+        else:
+            continue
+        # get rid of extra whitespace
+        while "  " in record.body:
+            record.body = record.body.replace("  ", " ")
+
+        media_url = "No Media"
+
+        if int(record.num_media) > 0:
+            for media in record.media.list():
+                media_url = 'https://api.twilio.com' + media.uri[:-5]  # Strip off the '.json'
+                # Add authorization header
+                media_url = media_url[0:8] + creds.twilio_account_sid + ":" + creds.twilio_auth_token + "@" + media_url[8:]
+
+        message_list.append([local_datetime,
+                             creds.twilio_phone_number,
+                             record.from_,
+                             record.body.strip()
+                            .replace("\n", " ")
+                            .replace("\r", ""),
+                             customer_name.title(), customer_category.title(), media_url])
+
+    # Write dataframe to csv
+    df = pandas.DataFrame(message_list, columns=["date", "to_phone", "from_phone", "body", "name", "category", "media"])
+    df.to_csv(creds.incoming_sms_log, index=False)
+
+
+def convert_timezone(timestamp, from_zone, to_zone):
+    print(type(timestamp), timestamp)
+    start_time = timestamp.replace(tzinfo=from_zone)
+    result_time = start_time.astimezone(to_zone).strftime("%Y-%m-%d %H:%M:%S")
+    return result_time

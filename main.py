@@ -3,11 +3,12 @@ from flask import request
 from waitress import serve
 from setup import creds, email_engine, sms_engine
 import pandas
-from datetime import datetime
 from flask_cors import CORS
 from jinja2 import Template
-from flask import Response
+import urllib.parse
+from datetime import datetime
 from twilio.twiml.messaging_response import MessagingResponse
+from setup.query_engine import QueryEngine
 
 app = flask.Flask(__name__)
 CORS(app)
@@ -71,15 +72,16 @@ def get_service_information():
     timeline = data.get('timeline')
     interested_in = data.get('interested_in')
 
-    interests = ""
-    if interested_in is not None:
-        for x in interested_in:
-            interests += x
-            if len(interested_in) > 1:
-                interests += ", "
+    if phone != "":
+        interests = ""
+        if interested_in is not None:
+            for x in interested_in:
+                interests += x
+                if len(interested_in) > 1:
+                    interests += ", "
+        send_text(first_name, last_name, phone, interests, timeline)
 
     send_email(first_name, email)
-    send_text(first_name, last_name, phone, interests, timeline)
 
     design_lead_data = [[str(datetime.now())[:-7], first_name, last_name, email, phone, interested_in, timeline]]
     df = pandas.DataFrame(design_lead_data, columns=["date", "first_name", "last_name", "email", "phone", "interested_in", "timeline"])
@@ -138,9 +140,55 @@ def newsletter_signup():
 
 @app.route('/sms', methods=['POST'])
 def incoming_sms():
-    data = request.json
-    print(data)
-    return "OK", 200
+    raw_data = request.get_data()
+    # Decode
+    string_code = raw_data.decode('utf-8')
+    # Parse to dictionary
+    msg = urllib.parse.parse_qs(string_code)
+    print(msg)
+    date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    from_phone =  msg['From'][0]
+    to_phone = msg['To'][0]
+    body = msg['Body'][0]
+    # Get MEDIA URL for MMS Messages
+    if int(msg['NumMedia'][0]) > 0:
+        media = msg['MediaUrl0'][0]
+        media_url = media[0:8] + creds.twilio_account_sid + ":" + creds.twilio_auth_token + "@" + media[8:]
+    else:
+        media_url = "No Media"
+    # Get Customer Name and Category from SQL
+    db = QueryEngine()
+    query = f"""
+    SELECT FST_NAM, LST_NAM, CATEG_COD
+    FROM AR_CUST
+    WHERE PHONE_1 = '{sms_engine.format_phone(from_phone, mode="counterpoint")}'
+    """
+    response = db.query_db(query)
+    if response is not None:
+        first_name = response[0][0]
+        last_name = response[0][1]
+        full_name = first_name + " " + last_name
+        category = response[0][2]
+    # For people with no phone in our database
+    else:
+        full_name = "Unknown"
+        category = "Unknown"
+
+    log_data = [[date, to_phone, from_phone, body, full_name, category.title(), media_url]]
+    # Write dataframe to CSV file
+    df = pandas.DataFrame(log_data, columns=["date", "to_phone", "from_phone", "body", "name", "category", "media"])
+    # Look for existing CSV file
+    try:
+        pandas.read_csv(creds.incoming_sms_log)
+    except FileNotFoundError:
+        sms_engine.write_all_twilio_messages_to_share()
+        df.to_csv(creds.incoming_sms_log, mode='a', header=False, index=False)
+    else:
+        df.to_csv(creds.incoming_sms_log, mode='a', header=False, index=False)
+
+    # Return Response to Twilio
+    resp = MessagingResponse()
+    return str(resp)
 
 
 if __name__ == '__main__':
