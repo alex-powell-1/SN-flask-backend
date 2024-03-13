@@ -43,7 +43,10 @@ def send_email(first_name, email):
                                  from_address=creds.gmail_user,
                                  recipients_list=recipient,
                                  subject=creds.email_subject,
-                                 content=email_content)
+                                 content=email_content,
+                                 mode='mixed',
+                                 logo=False,
+                                 attachment=True)
 
 
 def send_text(first_name, last_name, phone, interested_in, timeline):
@@ -64,6 +67,9 @@ def send_text(first_name, last_name, phone, interested_in, timeline):
 
 @app.route('/design', methods=["POST"])
 def get_service_information():
+    """Route for information request about company service. Sends user an email with PDF attachment
+    and personalized details."""
+
     data = request.json
     first_name = data.get('first_name')
     last_name = data.get('last_name')
@@ -102,8 +108,8 @@ def get_service_information():
 
 @app.route('/stock_notify', methods=['POST'])
 def stock_notification():
-    """get contact and product information from user who wants notification of when
-    a product comes back into stock"""
+    """Get contact and product information from user who wants notification of when
+    a product comes back into stock."""
     data = request.json
     email = data.get('email')
     item_no = data.get('sku')
@@ -123,7 +129,41 @@ def stock_notification():
 
 @app.route('/newsletter', methods=['POST'])
 def newsletter_signup():
-    email = request.form.get('email')
+    """Route for website pop-up. Offers user a coupon and adds their information to a csv."""
+    data = request.json
+    email = data.get('email')
+    print(email)
+    recipient = {"": email}
+    with open("./templates/new10.html", "r") as file:
+        template_str = file.read()
+
+    jinja_template = Template(template_str)
+
+    email_data = {
+        "title": f"Welcome to {creds.company_name}",
+        "greeting": f"Hi!",
+        "service": creds.service,
+        "coupon": "NEW10",
+        "company": creds.company_name,
+        "list_items": creds.list_items,
+        "signature_name": creds.signature_name,
+        "signature_title": creds.signature_title,
+        "company_phone": creds.company_phone,
+        "company_url": creds.company_url,
+        "company_reviews": creds.company_reviews
+    }
+
+    email_content = jinja_template.render(email_data)
+
+    email_engine.send_html_email(from_name=creds.company_name,
+                                 from_address=creds.gmail_user,
+                                 recipients_list=recipient,
+                                 subject=f"Welcome to {creds.company_name}! Coupon Inside!",
+                                 content=email_content,
+                                 mode='related',
+                                 logo=True,
+                                 attachment=False)
+
     newsletter_data = [[str(datetime.now())[:-7], email]]
     df = pandas.DataFrame(newsletter_data, columns=["date", "email"])
     # Looks for file. If it has been deleted, it will recreate.
@@ -140,35 +180,42 @@ def newsletter_signup():
 
 @app.route('/sms', methods=['POST'])
 def incoming_sms():
+    """Route for incoming SMS messages to be used with client messenger application.
+    Saves all incoming SMS/MMS messages to share drive csv file."""
     raw_data = request.get_data()
     # Decode
     string_code = raw_data.decode('utf-8')
     # Parse to dictionary
     msg = urllib.parse.parse_qs(string_code)
-    print(msg)
+
     date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    from_phone =  msg['From'][0]
+    from_phone = msg['From'][0]
     to_phone = msg['To'][0]
     body = msg['Body'][0]
+
     # Get MEDIA URL for MMS Messages
     if int(msg['NumMedia'][0]) > 0:
         media = msg['MediaUrl0'][0]
         media_url = media[0:8] + creds.twilio_account_sid + ":" + creds.twilio_auth_token + "@" + media[8:]
     else:
         media_url = "No Media"
+
     # Get Customer Name and Category from SQL
     db = QueryEngine()
+
     query = f"""
     SELECT FST_NAM, LST_NAM, CATEG_COD
     FROM AR_CUST
     WHERE PHONE_1 = '{sms_engine.format_phone(from_phone, mode="counterpoint")}'
     """
     response = db.query_db(query)
+
     if response is not None:
         first_name = response[0][0]
         last_name = response[0][1]
         full_name = first_name + " " + last_name
         category = response[0][2]
+
     # For people with no phone in our database
     else:
         full_name = "Unknown"
