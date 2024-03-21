@@ -6,7 +6,7 @@ import pandas
 from flask_cors import CORS
 from jinja2 import Template
 import urllib.parse
-from datetime import datetime, timezone
+from datetime import datetime
 from twilio.twiml.messaging_response import MessagingResponse
 from setup.query_engine import QueryEngine
 from setup.order_engine import Order, utc_to_local
@@ -37,7 +37,7 @@ def send_email(first_name, email):
         "service": creds.service,
         "company": creds.company_name,
         "list_items": creds.list_items,
-        "signature_name":creds.signature_name,
+        "signature_name": creds.signature_name,
         "signature_title": creds.signature_title,
         "company_phone": creds.company_phone,
         "company_url": creds.company_url,
@@ -302,14 +302,23 @@ def bc_orders():
         'company_name': creds.company_name,
         'co_address': creds.company_address,
         'co_phone': creds.company_phone,
-        'cu_name': order.first_name + " " + order.last_name,
-        'cu_phone': order.phone,
-        'cu_email': order.email,
-        'cu_street_1': order.street_1,
-        'cu_street_2': order.street_2,
-        'cu_city': order.city,
-        'cu_state': order.state,
-        'cu_zip': order.zip,
+        'cb_name': order.billing_first_name + " " + order.billing_last_name,
+        'cb_phone': order.billing_phone,
+        'cb_email': order.billing_email,
+        'cb_street': order.billing_street_address,
+        # 'cb_street_2': order.billing_street_2,
+        'cb_city': order.billing_city,
+        'cb_state': order.billing_state,
+        'cb_zip': order.billing_zip,
+        'cs_name': order.shipping_first_name + " " + order.shipping_last_name,
+        'cs_phone': order.shipping_phone,
+        'cs_email': order.shipping_email,
+        'cs_street': order.shipping_street_address,
+        'shipping_method': order.shipping_method,
+        # 'cs_street_2': order.shipping_street_2,
+        'cs_city': order.shipping_city,
+        'cs_state': order.shipping_state,
+        'cs_zip': order.shipping_zip,
         'order_date': date,
         'order_time': time,
         'order_subtotal': float(order.subtotal_inc_tax),
@@ -326,8 +335,9 @@ def bc_orders():
     }
     doc.render(context)
     ticket_name = f"ticket_{order_id}_{datetime.now().strftime("%m_%d_%y_%H_%M_%S")}.docx"
-    doc.save(ticket_name)
-    os.startfile(ticket_name, "print")
+    file_path = creds.ticket_location + ticket_name
+    doc.save(file_path)
+    os.startfile(file_path, "print")
 
     return json.dumps({'success': True}), 200, {'ContentType': 'application/json'}
 
@@ -338,4 +348,3 @@ if __name__ == '__main__':
     else:
         print("Flask Server Running")
         serve(app, host='localhost', port=9999)
-

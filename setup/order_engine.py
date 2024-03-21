@@ -1,5 +1,4 @@
 import requests
-import json
 from datetime import timezone
 
 
@@ -59,18 +58,19 @@ class Order:
         self.is_deleted = ""
         self.ebay_order_id = "0"
         self.cart_id = ""
-        self.first_name = ""
-        self.last_name = ""
-        self.company = ""
-        self.street_1 = ""
-        self.street_2 = ""
-        self.city = ""
-        self.state = ""
-        self.zip = ""
-        self.country = ""
-        self.country_iso2 = ""
-        self.phone = ""
-        self.email = ""
+        self.billing_first_name = ""
+        self.billing_last_name = ""
+        self.billing_company = ""
+        self.billing_street_address = ""
+        # self.billing_street_1 = ""
+        # self.billing_street_2 = ""
+        self.billing_city = ""
+        self.billing_state = ""
+        self.billing_zip = ""
+        self.billing_country = ""
+        self.billing_country_iso2 = ""
+        self.billing_phone = ""
+        self.billing_email = ""
         self.form_fields = []
         self.is_email_opt_in = ""
         self.credit_card_type = ""
@@ -79,6 +79,18 @@ class Order:
         self.external_source = ""
         self.order_products = []
         self.order_coupons = {}
+        self.shipping_address = {}
+        self.shipping_first_name = ""
+        self.shipping_last_name = ""
+        self.shipping_street_address = ""
+        # self.shipping_street_1 = ""
+        # self.shipping_street_2 = ""
+        self.shipping_city = ""
+        self.shipping_state = ""
+        self.shipping_zip = ""
+        self.shipping_email = ""
+        self.shipping_phone = ""
+        self.shipping_method = ""
         self.get_order_details()
 
     def get_order_details(self):
@@ -92,9 +104,9 @@ class Order:
         response = (requests.get(url, headers=headers))
         if response.status_code == 200:
             data = response.json()
-            pretty = response.content
-            pretty = json.loads(pretty)
-            pretty = json.dumps(pretty, indent=4)
+            # pretty = response.content
+            # pretty = json.loads(pretty)
+            # pretty = json.dumps(pretty, indent=4)
             # print(pretty)
             self.customer_id = data['customer_id']
             self.date_created = data['date_created']
@@ -149,18 +161,23 @@ class Order:
             self.is_deleted = data['is_deleted']
             self.ebay_order_id = data['ebay_order_id']
             self.cart_id = data['cart_id']
-            self.first_name = data['billing_address']['first_name']
-            self.last_name = data['billing_address']['last_name']
-            self.company = data['billing_address']['last_name']
-            self.street_1 = data['billing_address']['street_1']
-            self.street_2 = data['billing_address']['street_2']
-            self.city = data['billing_address']['city']
-            self.state = data['billing_address']['state']
-            self.zip = data['billing_address']['zip']
-            self.country = data['billing_address']['country']
-            self.country_iso2 = data['billing_address']['country_iso2']
-            self.phone = data['billing_address']['phone']
-            self.email = data['billing_address']['email']
+            self.billing_first_name = data['billing_address']['first_name']
+            self.billing_last_name = data['billing_address']['last_name']
+            self.billing_company = data['billing_address']['company']
+            if data['billing_address']['street_2'] == '':
+                self.billing_street_address = data['billing_address']['street_1']
+            else:
+                self.billing_street_address = (data['billing_address']['street_1'] + "\n" +
+                                               data['billing_address']['street_2'])
+            # self.billing_street_1 = data['billing_address']['street_1']
+            # self.billing_street_2 = data['billing_address']['street_2']
+            self.billing_city = data['billing_address']['city']
+            self.billing_state = data['billing_address']['state']
+            self.billing_zip = data['billing_address']['zip']
+            self.billing_country = data['billing_address']['country']
+            self.billing_country_iso2 = data['billing_address']['country_iso2']
+            self.billing_phone = format_phone(data['billing_address']['phone'], mode='clickable')
+            self.billing_email = data['billing_address']['email']
             self.form_fields = data['billing_address']['form_fields']
             self.is_email_opt_in = data['is_email_opt_in']
             self.credit_card_type = data['credit_card_type']
@@ -186,13 +203,59 @@ class Order:
             response = (requests.get(url, headers=headers))
             if response.status_code == 200:
                 data = response.json()
-                print(data[0])
                 self.order_coupons = data[0]
             elif response.status_code == 204:
                 self.order_coupons = {
                     "code": None
                 }
 
+                # Get Shipping Addresses
+                url = f"https://api.bigcommerce.com/stores/wmonsw2bbs/v2/orders/{self.order_id}/shipping_addresses"
+                response = (requests.get(url, headers=headers))
+                if response.status_code == 200:
+                    data = response.json()
+                    self.shipping_first_name = data[0]['first_name']
+                    self.shipping_last_name = data[0]['last_name']
+                    if data[0]['street_2'] == '':
+                        self.shipping_street_address = data[0]['street_1']
+                    else:
+                        self.shipping_street_address = (data[0]['street_1'] + "\n" +
+                                                       data[0]['street_2'])
+                    # self.shipping_street_1 = data[0]['street_1']
+                    # self.shipping_street_2 = data[0]['street_2']
+                    self.shipping_city = data[0]['city']
+                    self.shipping_state = data[0]['state']
+                    self.shipping_zip = data[0]['zip']
+                    self.shipping_email = data[0]['email']
+                    self.shipping_phone = format_phone(data[0]['phone'], mode='clickable')
+                    self.shipping_method = data[0]['shipping_method']
+
 
 def utc_to_local(utc_dt):
     return utc_dt.replace(tzinfo=timezone.utc).astimezone(tz=None)
+
+
+def format_phone(phone_number, mode="Twilio", prefix=False):
+    """Cleanses input data and returns masked phone for either Twilio or Counterpoint configuration"""
+    phone_number_as_string = str(phone_number)
+    # Strip away extra symbols
+    formatted_phone = phone_number_as_string.replace(" ", "")  # Remove Spaces
+    formatted_phone = formatted_phone.replace("-", "")  # Remove Hyphens
+    formatted_phone = formatted_phone.replace("(", "")  # Remove Open Parenthesis
+    formatted_phone = formatted_phone.replace(")", "")  # Remove Close Parenthesis
+    formatted_phone = formatted_phone.replace("+1", "")  # Remove +1
+    formatted_phone = formatted_phone[-10:]  # Get last 10 characters
+    if mode == "counterpoint":
+        # Masking ###-###-####
+        cp_phone = formatted_phone[0:3] + "-" + formatted_phone[3:6] + "-" + formatted_phone[6:10]
+        return cp_phone
+
+    elif mode == "clickable":
+        # Masking ###-###-####
+        clickable_phone = "(" + formatted_phone[0:3] + ") " + formatted_phone[3:6] + "-" + formatted_phone[6:10]
+        return clickable_phone
+
+    else:
+        if prefix:
+            formatted_phone = "+1" + formatted_phone
+        return formatted_phone
