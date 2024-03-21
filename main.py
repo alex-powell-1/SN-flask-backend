@@ -1,14 +1,21 @@
 import flask
 from flask import request
 from waitress import serve
-from setup import creds, email_engine, sms_engine
+from setup import creds, email_engine, sms_engine, product_engine
 import pandas
 from flask_cors import CORS
 from jinja2 import Template
 import urllib.parse
-from datetime import datetime
+from datetime import datetime, timezone
 from twilio.twiml.messaging_response import MessagingResponse
 from setup.query_engine import QueryEngine
+from setup.order_engine import Order, utc_to_local
+import code128
+import os
+import json
+from docxtpl import DocxTemplate, InlineImage
+from docx.shared import Mm
+from email import utils
 
 app = flask.Flask(__name__)
 CORS(app)
@@ -113,8 +120,21 @@ def stock_notification():
     data = request.json
     email = data.get('email')
     item_no = data.get('sku')
+    try:
+        df = pandas.read_csv(creds.stock_notification_log)
+    except FileNotFoundError:
+        pass
+    else:
+        entries = df.to_dict("records")
+        for x in entries:
+            if x['email'] == email and str(x['item_no']) == item_no:
+                print(f"{email} is already on file for this item")
+                return ("This email address is already on file for this item. We will send you an email "
+                        "when it comes back in stock. Please contact our office at <a href='tel:8288740679'>(828) 874-0679</a> if you need an alternative "
+                        "item. Thank you!"), 400
+
     stock_notification_data = [[str(datetime.now())[:-7], email, item_no]]
-    df = pandas.DataFrame(stock_notification_data, columns=["date", "email", "item_no"])
+    df = pandas.DataFrame(stock_notification_data, columns=["date", "email", str("item_no")])
     # Looks for file. If it has been deleted, it will recreate.
     try:
         pandas.read_csv(creds.stock_notification_log)
@@ -129,10 +149,21 @@ def stock_notification():
 
 @app.route('/newsletter', methods=['POST'])
 def newsletter_signup():
-    """Route for website pop-up. Offers user a coupon and adds their information to a csv."""
+    """Route for website pop-up. Offers user a coupon and adds their information to a csv.
+    NOTES: ADD check for email already on file!"""
     data = request.json
     email = data.get('email')
-    print(email)
+    try:
+        df = pandas.read_csv(creds.newsletter_log)
+    except FileNotFoundError:
+        print("Coupon File Not Found")
+    else:
+        entries = df.to_dict("records")
+        for x in entries:
+            if x['email'] == email:
+                print(f"{email} is already on file")
+                return "This email address is already on file.", 400
+
     recipient = {"": email}
     with open("./templates/new10.html", "r") as file:
         template_str = file.read()
@@ -236,6 +267,69 @@ def incoming_sms():
     # Return Response to Twilio
     resp = MessagingResponse()
     return str(resp)
+
+
+@app.route('/bc', methods=['POST'])
+def bc_orders():
+    response_data = request.get_json()
+    order_id = response_data['data']['id']
+    order = Order(order_id)
+    bc_date = order.date_created
+    dt_date = utils.parsedate_to_datetime(bc_date)
+    date = utc_to_local(dt_date).strftime("%m/%d/%Y")
+    time = utc_to_local(dt_date).strftime("%I:%M:%S %p")
+    number_of_items = order.items_total
+    ticket_notes = order.customer_message
+    products = order.order_products
+    product_list = []
+    for x in products:
+        item = product_engine.Product(x['sku'])
+        product_details = {'sku': item.item_no,
+                           'name': item.descr,
+                           'qty': x['quantity']
+                           }
+        product_list.append(product_details)
+    # Create Barcode
+    code128.image(order_id).save("barcode.png")  # with PIL present
+    with open("barcode.svg", "w") as f:
+        f.write(code128.svg(order_id))
+
+    # Print the document
+    doc = DocxTemplate("./template.docx")
+    barcode = InlineImage(doc, './barcode.png', height=Mm(15))  # width is in millimetres
+    context = {
+        'order_number': order_id,
+        'company_name': creds.company_name,
+        'co_address': creds.company_address,
+        'co_phone': creds.company_phone,
+        'cu_name': order.first_name + " " + order.last_name,
+        'cu_phone': order.phone,
+        'cu_email': order.email,
+        'cu_street_1': order.street_1,
+        'cu_street_2': order.street_2,
+        'cu_city': order.city,
+        'cu_state': order.state,
+        'cu_zip': order.zip,
+        'order_date': date,
+        'order_time': time,
+        'order_subtotal': float(order.subtotal_inc_tax),
+        'order_shipping': float(order.shipping_cost_inc_tax),
+        'order_total': float(order.total_inc_tax),
+        'number_of_items': number_of_items,
+        'ticket_notes': ticket_notes,
+        'products': product_list,
+        'coupon_code': order.order_coupons['code'],
+        'coupon_discount': float(order.coupon_discount),
+        'loyalty': float(order.store_credit_amount),
+        'gc_amount': float(order.gift_certificate_amount),
+        'barcode': barcode
+    }
+    doc.render(context)
+    ticket_name = f"ticket_{order_id}_{datetime.now().strftime("%m_%d_%y_%H_%M_%S")}.docx"
+    doc.save(ticket_name)
+    os.startfile(ticket_name, "print")
+
+    return json.dumps({'success': True}), 200, {'ContentType': 'application/json'}
 
 
 if __name__ == '__main__':
