@@ -107,7 +107,10 @@ class Order:
             pretty = response.content
             pretty = json.loads(pretty)
             pretty = json.dumps(pretty, indent=4)
+            print("----")
+            print("Order")
             print(pretty)
+            print("----")
             self.customer_id = data['customer_id']
             self.date_created = data['date_created']
             self.date_modified = data['date_modified']
@@ -195,6 +198,13 @@ class Order:
             response = (requests.get(url, headers=headers))
             if response.status_code == 200:
                 data = response.json()
+                pretty = response.content
+                pretty = json.loads(pretty)
+                pretty = json.dumps(pretty, indent=4)
+                print("----")
+                print("Products")
+                print(pretty)
+                print("----")
                 for x in data:
                     self.order_products.append(x)
 
