@@ -1,6 +1,6 @@
 import requests
 from datetime import timezone
-
+import json
 
 class Order:
     def __init__(self, order_id):
@@ -104,10 +104,10 @@ class Order:
         response = (requests.get(url, headers=headers))
         if response.status_code == 200:
             data = response.json()
-            # pretty = response.content
-            # pretty = json.loads(pretty)
-            # pretty = json.dumps(pretty, indent=4)
-            # print(pretty)
+            pretty = response.content
+            pretty = json.loads(pretty)
+            pretty = json.dumps(pretty, indent=4)
+            print(pretty)
             self.customer_id = data['customer_id']
             self.date_created = data['date_created']
             self.date_modified = data['date_modified']

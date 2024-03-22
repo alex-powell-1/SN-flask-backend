@@ -274,70 +274,71 @@ def bc_orders():
     response_data = request.get_json()
     order_id = response_data['data']['id']
     order = Order(order_id)
-    bc_date = order.date_created
-    dt_date = utils.parsedate_to_datetime(bc_date)
-    date = utc_to_local(dt_date).strftime("%m/%d/%Y")
-    time = utc_to_local(dt_date).strftime("%I:%M:%S %p")
-    number_of_items = order.items_total
-    ticket_notes = order.customer_message
-    products = order.order_products
-    product_list = []
-    for x in products:
-        item = product_engine.Product(x['sku'])
-        product_details = {'sku': item.item_no,
-                           'name': item.descr,
-                           'qty': x['quantity']
-                           }
-        product_list.append(product_details)
-    # Create Barcode
-    code128.image(order_id).save("barcode.png")  # with PIL present
-    with open("barcode.svg", "w") as f:
-        f.write(code128.svg(order_id))
+    if order.payment_status != 'declined':
+        bc_date = order.date_created
+        dt_date = utils.parsedate_to_datetime(bc_date)
+        date = utc_to_local(dt_date).strftime("%m/%d/%Y")
+        time = utc_to_local(dt_date).strftime("%I:%M:%S %p")
+        number_of_items = order.items_total
+        ticket_notes = order.customer_message
+        products = order.order_products
+        product_list = []
+        for x in products:
+            item = product_engine.Product(x['sku'])
+            product_details = {'sku': item.item_no,
+                               'name': item.descr,
+                               'qty': x['quantity']
+                               }
+            product_list.append(product_details)
+        # Create Barcode
+        code128.image(order_id).save("barcode.png")  # with PIL present
+        with open("barcode.svg", "w") as f:
+            f.write(code128.svg(order_id))
 
-    # Print the document
-    doc = DocxTemplate("./template.docx")
-    barcode = InlineImage(doc, './barcode.png', height=Mm(15))  # width is in millimetres
-    context = {
-        'order_number': order_id,
-        'company_name': creds.company_name,
-        'co_address': creds.company_address,
-        'co_phone': creds.company_phone,
-        'cb_name': order.billing_first_name + " " + order.billing_last_name,
-        'cb_phone': order.billing_phone,
-        'cb_email': order.billing_email,
-        'cb_street': order.billing_street_address,
-        # 'cb_street_2': order.billing_street_2,
-        'cb_city': order.billing_city,
-        'cb_state': order.billing_state,
-        'cb_zip': order.billing_zip,
-        'cs_name': order.shipping_first_name + " " + order.shipping_last_name,
-        'cs_phone': order.shipping_phone,
-        'cs_email': order.shipping_email,
-        'cs_street': order.shipping_street_address,
-        'shipping_method': order.shipping_method,
-        # 'cs_street_2': order.shipping_street_2,
-        'cs_city': order.shipping_city,
-        'cs_state': order.shipping_state,
-        'cs_zip': order.shipping_zip,
-        'order_date': date,
-        'order_time': time,
-        'order_subtotal': float(order.subtotal_inc_tax),
-        'order_shipping': float(order.shipping_cost_inc_tax),
-        'order_total': float(order.total_inc_tax),
-        'number_of_items': number_of_items,
-        'ticket_notes': ticket_notes,
-        'products': product_list,
-        'coupon_code': order.order_coupons['code'],
-        'coupon_discount': float(order.coupon_discount),
-        'loyalty': float(order.store_credit_amount),
-        'gc_amount': float(order.gift_certificate_amount),
-        'barcode': barcode
-    }
-    doc.render(context)
-    ticket_name = f"ticket_{order_id}_{datetime.now().strftime("%m_%d_%y_%H_%M_%S")}.docx"
-    file_path = creds.ticket_location + ticket_name
-    doc.save(file_path)
-    os.startfile(file_path, "print")
+        # Print the document
+        doc = DocxTemplate("./template.docx")
+        barcode = InlineImage(doc, './barcode.png', height=Mm(15))  # width is in millimetres
+        context = {
+            'order_number': order_id,
+            'company_name': creds.company_name,
+            'co_address': creds.company_address,
+            'co_phone': creds.company_phone,
+            'cb_name': order.billing_first_name + " " + order.billing_last_name,
+            'cb_phone': order.billing_phone,
+            'cb_email': order.billing_email,
+            'cb_street': order.billing_street_address,
+            # 'cb_street_2': order.billing_street_2,
+            'cb_city': order.billing_city,
+            'cb_state': order.billing_state,
+            'cb_zip': order.billing_zip,
+            'cs_name': order.shipping_first_name + " " + order.shipping_last_name,
+            'cs_phone': order.shipping_phone,
+            'cs_email': order.shipping_email,
+            'cs_street': order.shipping_street_address,
+            'shipping_method': order.shipping_method,
+            # 'cs_street_2': order.shipping_street_2,
+            'cs_city': order.shipping_city,
+            'cs_state': order.shipping_state,
+            'cs_zip': order.shipping_zip,
+            'order_date': date,
+            'order_time': time,
+            'order_subtotal': float(order.subtotal_inc_tax),
+            'order_shipping': float(order.shipping_cost_inc_tax),
+            'order_total': float(order.total_inc_tax),
+            'number_of_items': number_of_items,
+            'ticket_notes': ticket_notes,
+            'products': product_list,
+            'coupon_code': order.order_coupons['code'],
+            'coupon_discount': float(order.coupon_discount),
+            'loyalty': float(order.store_credit_amount),
+            'gc_amount': float(order.gift_certificate_amount),
+            'barcode': barcode
+        }
+        doc.render(context)
+        ticket_name = f"ticket_{order_id}_{datetime.now().strftime("%m_%d_%y_%H_%M_%S")}.docx"
+        file_path = creds.ticket_location + ticket_name
+        doc.save(file_path)
+        os.startfile(file_path, "print")
 
     return json.dumps({'success': True}), 200, {'ContentType': 'application/json'}
 
