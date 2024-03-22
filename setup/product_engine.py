@@ -1,7 +1,9 @@
-from setup.query_engine import QueryEngine
-from setup.date_presets import *
-from setup.big_products import *
 import pandas
+
+from setup.big_products import *
+from setup.date_presets import *
+from setup.query_engine import QueryEngine
+from setup.log_engine import create_product_log
 
 db = QueryEngine()
 
@@ -154,9 +156,7 @@ class Product:
                         SET USR_PROF_ALPHA_18 = '{self.item_url}'
                         WHERE ITEM_NO = '{self.item_no}'
                         """
-                        response = db.query_db(query, commit=True)
-
-
+                        db.query_db(query, commit=True)
 
         else:
             return "No Item Matching that SKU"
@@ -200,106 +200,6 @@ class Product:
                 return "Not a parent product"
         else:
             return "Not a bound product"
-
-    def update_product_on_big_commerce(self):
-        variant_list = "MORE WORK HERE FUNCTION NEEDED"
-        product_id = "MORE WORK HERE - FUNCTION NEEDED"
-        payload = f"""{
-            "name": {self.web_title},
-            "type": "physical",
-            "sku": {self.item_no},
-            "description": {self.web_description},
-            "weight": 0,
-            "width": 0,
-            "depth": 0,
-            "height": 0,
-            "price": {self.price_1},
-            "cost_price": 0,
-            "retail_price": {self.price_1},
-            "sale_price": {self.price_2},
-            "map_price": 0,
-            "tax_class_id": 255 GET FROM BIG,
-            "product_tax_code": "string" GET FROM BIG,
-            "categories": [
-            0 GET FROM BIG
-            ],
-            "brand_id": 1000000000 GET FROM BIG,
-            "brand_name": {self.brand},
-            "inventory_level": {self.buffered_quantity_available},
-            "inventory_warning_level": 5,
-            "inventory_tracking": "none",
-            "fixed_cost_shipping_price": 0.1,
-            "is_free_shipping": true,
-            "is_visible": {"true" if self.web_visible == 'Y' else "false"},
-            "is_featured": {"true" if self.featured == 'Y' else "false"},
-            "related_products": [
-            0
-            ],
-            "warranty": "",
-            "bin_picking_number": "",
-            "layout_file": "",
-            "upc": "string",
-            "search_keywords": {self.search_key},
-            "availability_description": {self.availability_description},
-            "availability": "available",
-            "gift_wrapping_options_type": "any",
-            "gift_wrapping_options_list": [
-            0
-            ],
-            "sort_order": {self.sort_order},
-            "condition": "New",
-            "is_condition_shown": true,
-            "order_quantity_minimum": 1,
-            "order_quantity_maximum": 1000,
-            "page_title": {self.web_title},
-            "meta_description": {self.meta_description},
-            "view_count": 3000,
-            "preorder_release_date": "2019-08-24T14:15:22Z",
-            "preorder_message": "string",
-            "is_preorder_only": false,
-            "is_price_hidden": false,
-            "price_hidden_label": "string",
-            "custom_url": {
-                "url": {self.custom_url},
-                "is_customized": true
-            },
-            "open_graph_type": "product",
-            "open_graph_title": "string",
-            "open_graph_description": "string",
-            "open_graph_use_meta_description": true,
-            "open_graph_use_product_name": true,
-            "open_graph_use_image": true,
-            "custom_fields": [
-            {
-                "id": 6,
-                "name": "ISBN",
-                "value": "1234567890123"
-                }
-            ],
-            "bulk_pricing_rules": [
-                {
-                    "quantity_min": 10,
-                    "quantity_max": 50,
-                    "type": "price",
-                    "amount": 10
-                }
-            ],
-            "images": [
-                {
-                    "image_file": "string",
-                    "is_thumbnail": true,
-                    "sort_order": -2147483648,
-                    "description": "string",
-                    "image_url": "string",
-                    "id": 0,
-                    "product_id": 0,
-                    "date_modified": "2019-08-24T14:15:22Z"
-                }
-            ],
-            "variants": {variant_list}
-        }
-            """
-        bc_update_product(product_id, payload)
 
     def get_product_id(self):
         if self.binding_key is not None:
@@ -467,7 +367,7 @@ class Product:
                                    log_location=creds.featured_products)
 
     def set_sale_price(self, discount):
-        sale_price = round(float(self.price_1 * (100 - discount)/100), 2)
+        sale_price = round(float(self.price_1 * (100 - discount) / 100), 2)
         query = f"""
         UPDATE IM_PRC
         SET PRC_2 = '{sale_price}', LST_MAINT_DT = GETDATE()
@@ -476,16 +376,16 @@ class Product:
         db.query_db(query, commit=True)
         print(f"updated {self.long_descr} from ${self.price_1} to ${sale_price}")
 
-    def get_top_child_product(self):
-        """Get Top Performing child product of merged product (by sales in last year window)"""
-        from reporting.product_reports import create_top_items_report
-        top_child = create_top_items_report(beginning_date=one_year_ago,
-                                            ending_date=last_year_forecast,
-                                            merged=True,
-                                            binding_id=self.binding_key,
-                                            number_of_items=1,
-                                            return_format=3)[0]
-        return top_child
+    # def get_top_child_product(self):
+    #     """Get Top Performing child product of merged product (by sales in last year window)"""
+    #     from reporting.product_reports import create_top_items_report
+    #     top_child = create_top_items_report(beginning_date=one_year_ago,
+    #                                         ending_date=last_year_forecast,
+    #                                         merged=True,
+    #                                         binding_id=self.binding_key,
+    #                                         number_of_items=1,
+    #                                         return_format=3)[0]
+    #     return top_child
 
 
 def get_ecomm_items(mode=1):
@@ -663,20 +563,20 @@ def get_merged_product_combined_stock(binding_id):
         return None
 
 
-def get_items_with_no_sales_history():
-    from reporting.product_reports import create_top_items_report
-    all_ecomm_items = get_ecomm_items(mode=2)
-    top_ecomm_items = create_top_items_report(
-        beginning_date=one_year_ago,
-        ending_date=last_year_forecast,
-        mode="sales",
-        number_of_items=get_ecomm_items(mode=1),
-        return_format=3)
-    result = []
-    for x in all_ecomm_items:
-        if x not in top_ecomm_items:
-            result.append(x)
-    return result
+# def get_items_with_no_sales_history():
+#     from reporting.product_reports import create_top_items_report
+#     all_ecomm_items = get_ecomm_items(mode=2)
+#     top_ecomm_items = create_top_items_report(
+#         beginning_date=one_year_ago,
+#         ending_date=last_year_forecast,
+#         mode="sales",
+#         number_of_items=get_ecomm_items(mode=1),
+#         return_format=3)
+#     result = []
+#     for x in all_ecomm_items:
+#         if x not in top_ecomm_items:
+#             result.append(x)
+#     return result
 
 
 def get_new_items(start_date, end_date, min_price):

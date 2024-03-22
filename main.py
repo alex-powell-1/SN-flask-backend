@@ -1,82 +1,35 @@
-import flask
-from flask import request
-from waitress import serve
-from setup import creds, email_engine, sms_engine, product_engine
-import pandas
-from flask_cors import CORS
-from jinja2 import Template
+import json
+import os
 import urllib.parse
 from datetime import datetime
-from twilio.twiml.messaging_response import MessagingResponse
-from setup.query_engine import QueryEngine
-from setup.order_engine import Order, utc_to_local
-import code128
-import os
-import json
-from docxtpl import DocxTemplate, InlineImage
-from docx.shared import Mm
 from email import utils
+
+import flask
+import pandas
+from docx.shared import Mm
+from docxtpl import DocxTemplate, InlineImage
+from flask import request
+from flask_cors import CORS
+from jinja2 import Template
+from twilio.twiml.messaging_response import MessagingResponse
+from waitress import serve
+
+from setup import barcode_engine
+from setup import creds, email_engine, sms_engine, product_engine
+from setup import log_engine
+from setup.order_engine import Order, utc_to_local
 
 app = flask.Flask(__name__)
 CORS(app)
 
+# When False, app is served by Waitress
 dev = False
-
-
-def send_email(first_name, email):
-    """Send PDF attachment to customer"""
-    recipient = {first_name: email}
-    with open("./templates/email_body.html", "r") as file:
-        template_str = file.read()
-
-    jinja_template = Template(template_str)
-
-    email_data = {
-        "title": creds.email_subject,
-        "greeting": f"Hi {first_name},",
-        "service": creds.service,
-        "company": creds.company_name,
-        "list_items": creds.list_items,
-        "signature_name": creds.signature_name,
-        "signature_title": creds.signature_title,
-        "company_phone": creds.company_phone,
-        "company_url": creds.company_url,
-        "company_reviews": creds.company_reviews
-    }
-
-    email_content = jinja_template.render(email_data)
-
-    email_engine.send_html_email(from_name=creds.company_name,
-                                 from_address=creds.gmail_user,
-                                 recipients_list=recipient,
-                                 subject=creds.email_subject,
-                                 content=email_content,
-                                 mode='mixed',
-                                 logo=False,
-                                 attachment=True)
-
-
-def send_text(first_name, last_name, phone, interested_in, timeline):
-    """Send text message to sales team mangers for customer followup"""
-    name = f"{first_name} {last_name}".title()
-    message = (f"{name} just requested a phone follow-up about {creds.service}.\n"
-               f"Interested in: {interested_in}\n"
-               f"Timeline: {timeline}\n"
-               f"Phone: {sms_engine.format_phone(phone, mode='clickable')}")
-    sms = sms_engine.SMSEngine()
-    for k, v in creds.lead_recipient.items():
-        sms.send_text(name=name,
-                      to_phone=sms_engine.format_phone(v, prefix=True),
-                      message=message,
-                      log_location=creds.sms_log,
-                      create_log=True)
 
 
 @app.route('/design', methods=["POST"])
 def get_service_information():
     """Route for information request about company service. Sends user an email with PDF attachment
     and personalized details."""
-
     data = request.json
     first_name = data.get('first_name')
     last_name = data.get('last_name')
@@ -92,23 +45,17 @@ def get_service_information():
                 interests += x
                 if len(interested_in) > 1:
                     interests += ", "
-        send_text(first_name, last_name, phone, interests, timeline)
+        sms_engine.design_text(first_name, last_name, phone, interests, timeline)
 
-    send_email(first_name, email)
+    email_engine.design_email(first_name, email)
 
     design_lead_data = [[str(datetime.now())[:-7], first_name, last_name, email, phone, interested_in, timeline]]
-    df = pandas.DataFrame(design_lead_data, columns=["date", "first_name", "last_name", "email", "phone", "interested_in", "timeline"])
+    df = pandas.DataFrame(design_lead_data,
+                          columns=["date", "first_name", "last_name", "email", "phone", "interested_in", "timeline"])
 
-    # Looks for file. If it has been deleted, it will recreate.
-    try:
-        pandas.read_csv(creds.lead_log)
-    except FileNotFoundError:
-        df.to_csv(creds.lead_log, mode='a', header=True, index=False)
-    else:
-        df.to_csv(creds.lead_log, mode='a', header=False, index=False)
+    log_engine.write_log(df, creds.lead_log)
 
-    finally:
-        print(f"{creds.service} request for information received!".capitalize())
+    print(f"{creds.service} request for information received!".capitalize())
 
     return "Your information has been received. Please check your email for more information from our team."
 
@@ -130,21 +77,14 @@ def stock_notification():
             if x['email'] == email and str(x['item_no']) == item_no:
                 print(f"{email} is already on file for this item")
                 return ("This email address is already on file for this item. We will send you an email "
-                        "when it comes back in stock. Please contact our office at <a href='tel:8288740679'>(828) 874-0679</a> if you need an alternative "
+                        "when it comes back in stock. Please contact our office at "
+                        "<a href='tel:8288740679'>(828) 874-0679</a> if you need an alternative "
                         "item. Thank you!"), 400
 
     stock_notification_data = [[str(datetime.now())[:-7], email, item_no]]
     df = pandas.DataFrame(stock_notification_data, columns=["date", "email", str("item_no")])
-    # Looks for file. If it has been deleted, it will recreate.
-    try:
-        pandas.read_csv(creds.stock_notification_log)
-    except FileNotFoundError:
-        df.to_csv(creds.stock_notification_log, mode='a', header=True, index=False)
-    else:
-        df.to_csv(creds.stock_notification_log, mode='a', header=False, index=False)
-
-    finally:
-        return "Your submission was received."
+    log_engine.write_log(df, creds.stock_notification_log)
+    return "Your submission was received."
 
 
 @app.route('/newsletter', methods=['POST'])
@@ -197,16 +137,8 @@ def newsletter_signup():
 
     newsletter_data = [[str(datetime.now())[:-7], email]]
     df = pandas.DataFrame(newsletter_data, columns=["date", "email"])
-    # Looks for file. If it has been deleted, it will recreate.
-    try:
-        pandas.read_csv(creds.newsletter_log)
-    except FileNotFoundError:
-        df.to_csv(creds.newsletter_log, mode='a', header=True, index=False)
-    else:
-        df.to_csv(creds.newsletter_log, mode='a', header=False, index=False)
-
-    finally:
-        return "OK", 200
+    log_engine.write_log(df, creds.newsletter_log)
+    return "OK", 200
 
 
 @app.route('/sms', methods=['POST'])
@@ -232,38 +164,12 @@ def incoming_sms():
         media_url = "No Media"
 
     # Get Customer Name and Category from SQL
-    db = QueryEngine()
-
-    query = f"""
-    SELECT FST_NAM, LST_NAM, CATEG_COD
-    FROM AR_CUST
-    WHERE PHONE_1 = '{sms_engine.format_phone(from_phone, mode="counterpoint")}'
-    """
-    response = db.query_db(query)
-
-    if response is not None:
-        first_name = response[0][0]
-        last_name = response[0][1]
-        full_name = first_name + " " + last_name
-        category = response[0][2]
-
-    # For people with no phone in our database
-    else:
-        full_name = "Unknown"
-        category = "Unknown"
+    full_name, category = sms_engine.lookup_customer_data(sms_engine.format_phone(from_phone, mode="counterpoint"))
 
     log_data = [[date, to_phone, from_phone, body, full_name, category.title(), media_url]]
     # Write dataframe to CSV file
     df = pandas.DataFrame(log_data, columns=["date", "to_phone", "from_phone", "body", "name", "category", "media"])
-    # Look for existing CSV file
-    try:
-        pandas.read_csv(creds.incoming_sms_log)
-    except FileNotFoundError:
-        sms_engine.write_all_twilio_messages_to_share()
-        df.to_csv(creds.incoming_sms_log, mode='a', header=False, index=False)
-    else:
-        df.to_csv(creds.incoming_sms_log, mode='a', header=False, index=False)
-
+    log_engine.write_log(df, creds.incoming_sms_log)
     # Return Response to Twilio
     resp = MessagingResponse()
     return str(resp)
@@ -301,40 +207,42 @@ def bc_orders():
         # FILTER OUT GIFT CARDS (NO PHYSICAL PRODUCTS)
         if not gift_card_only:
             # Create Barcode
-            code128.image(order_id).save("barcode.png")  # with PIL present
-            with open("barcode.svg", "w") as f:
-                f.write(code128.svg(order_id))
-
+            barcode_filename = 'barcode'
+            barcode_engine.generate_barcode(data=order_id, filename=barcode_filename)
             # Create the Word document
             doc = DocxTemplate("./template.docx")
-            barcode = InlineImage(doc, './barcode.png', height=Mm(15))  # width is in millimetres
+            barcode = InlineImage(doc, f'./{barcode_filename}.png', height=Mm(15))  # width in mm
+
             context = {
-                'order_number': order_id,
+                # Company Details
                 'company_name': creds.company_name,
                 'co_address': creds.company_address,
                 'co_phone': creds.company_phone,
-                'cb_name': order.billing_first_name + " " + order.billing_last_name,
-                'cb_phone': order.billing_phone,
-                'cb_email': order.billing_email,
-                'cb_street': order.billing_street_address,
-                # 'cb_street_2': order.billing_street_2,
-                'cb_city': order.billing_city,
-                'cb_state': order.billing_state,
-                'cb_zip': order.billing_zip,
-                'cs_name': order.shipping_first_name + " " + order.shipping_last_name,
-                'cs_phone': order.shipping_phone,
-                'cs_email': order.shipping_email,
-                'cs_street': order.shipping_street_address,
-                'shipping_method': order.shipping_method,
-                # 'cs_street_2': order.shipping_street_2,
-                'cs_city': order.shipping_city,
-                'cs_state': order.shipping_state,
-                'cs_zip': order.shipping_zip,
+                # Order Details
+                'order_number': order_id,
                 'order_date': date,
                 'order_time': time,
                 'order_subtotal': float(order.subtotal_inc_tax),
                 'order_shipping': float(order.shipping_cost_inc_tax),
                 'order_total': float(order.total_inc_tax),
+                # Customer Billing
+                'cb_name': order.billing_first_name + " " + order.billing_last_name,
+                'cb_phone': order.billing_phone,
+                'cb_email': order.billing_email,
+                'cb_street': order.billing_street_address,
+                'cb_city': order.billing_city,
+                'cb_state': order.billing_state,
+                'cb_zip': order.billing_zip,
+                # Customer Shipping
+                'shipping_method': order.shipping_method,
+                'cs_name': order.shipping_first_name + " " + order.shipping_last_name,
+                'cs_phone': order.shipping_phone,
+                'cs_email': order.shipping_email,
+                'cs_street': order.shipping_street_address,
+                'cs_city': order.shipping_city,
+                'cs_state': order.shipping_state,
+                'cs_zip': order.shipping_zip,
+                # Product Details
                 'number_of_items': number_of_items,
                 'ticket_notes': ticket_notes,
                 'products': product_list,

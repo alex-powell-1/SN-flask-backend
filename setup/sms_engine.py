@@ -153,7 +153,23 @@ def write_all_twilio_messages_to_share():
 
 
 def convert_timezone(timestamp, from_zone, to_zone):
-    print(type(timestamp), timestamp)
+    """Convert from UTC to Local Time"""
     start_time = timestamp.replace(tzinfo=from_zone)
     result_time = start_time.astimezone(to_zone).strftime("%Y-%m-%d %H:%M:%S")
     return result_time
+
+
+def design_text(first_name, last_name, phone, interested_in, timeline):
+    """Send text message to sales team mangers for customer followup"""
+    name = f"{first_name} {last_name}".title()
+    message = (f"{name} just requested a phone follow-up about {creds.service}.\n"
+               f"Interested in: {interested_in}\n"
+               f"Timeline: {timeline}\n"
+               f"Phone: {format_phone(phone, mode='clickable')}")
+    sms = SMSEngine()
+    for k, v in creds.lead_recipient.items():
+        sms.send_text(name=name,
+                      to_phone=format_phone(v, prefix=True),
+                      message=message,
+                      log_location=creds.sms_log,
+                      create_log=True)
