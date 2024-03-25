@@ -1,5 +1,6 @@
 import json
 import os
+import time
 import urllib.parse
 from datetime import datetime
 from email import utils
@@ -52,7 +53,7 @@ def get_service_information():
                 if len(interested_in) > 1:
                     interests += ", "
         # Send text notification To sales team manager
-        # sms_engine.design_text(first_name, last_name, phone, interests, timeline)
+        sms_engine.design_text(first_name, last_name, phone, interests, timeline)
 
     # Send email to client
     email_engine.design_email(first_name, email)
@@ -79,6 +80,8 @@ def get_service_information():
     doc.save(f"./{ticket_name}")
     # Print the file to default printer
     os.startfile(ticket_name, "print")
+    # Delay while print job executes
+    time.sleep(3)
     # Delete the unneeded Word document
     os.remove(ticket_name)
 
