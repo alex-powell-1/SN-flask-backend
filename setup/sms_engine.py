@@ -61,7 +61,7 @@ def create_sms_log(name, phone, sent_message, response, log_location):
         df.to_csv(log_location, mode='a', header=False, index=False)
 
 
-def format_phone(phone_number, mode="Twilio", prefix=False):
+def format_phone(phone_number, mode="clickable", prefix=False):
     """Cleanses input data and returns masked phone for either Twilio or Counterpoint configuration"""
     phone_number_as_string = str(phone_number)
     # Strip away extra symbols
@@ -165,7 +165,7 @@ def design_text(first_name, last_name, phone, interested_in, timeline):
     message = (f"{name} just requested a phone follow-up about {creds.service}.\n"
                f"Interested in: {interested_in}\n"
                f"Timeline: {timeline}\n"
-               f"Phone: {format_phone(phone, mode='clickable')}")
+               f"Phone: {format_phone(phone)}")
     sms = SMSEngine()
     for k, v in creds.lead_recipient.items():
         sms.send_text(name=name,
