@@ -1,6 +1,8 @@
-import requests
-from datetime import timezone
 import json
+from datetime import timezone
+
+import requests
+
 
 class Order:
     def __init__(self, order_id):
@@ -220,7 +222,7 @@ class Order:
                 }
 
                 # Get Shipping Addresses
-                url = f"https://api.bigcommerce.com/stores/wmonsw2bbs/v2/orders/{self.order_id}/shipping_addresses"
+                url = f"https://api.bigcommerce.com/stores/{creds.big_store_hash}/v2/orders/{self.order_id}/shipping_addresses"
                 response = (requests.get(url, headers=headers))
                 if response.status_code == 200:
                     data = response.json()
@@ -230,7 +232,7 @@ class Order:
                         self.shipping_street_address = data[0]['street_1']
                     else:
                         self.shipping_street_address = (data[0]['street_1'] + "\n" +
-                                                       data[0]['street_2'])
+                                                        data[0]['street_2'])
                     # self.shipping_street_1 = data[0]['street_1']
                     # self.shipping_street_2 = data[0]['street_2']
                     self.shipping_city = data[0]['city']
@@ -239,6 +241,43 @@ class Order:
                     self.shipping_email = data[0]['email']
                     self.shipping_phone = format_phone(data[0]['phone'], mode='clickable')
                     self.shipping_method = data[0]['shipping_method']
+
+    def refund_order(self):
+        from setup import creds
+        url = (f'https://api.bigcommerce.com/stores/{creds.big_store_hash}/'
+               f'v3/orders/{self.order_id}/payment_actions/refund_quotes')
+        headers = {
+            'X-Auth-Token': creds.big_access_token,
+            'Content-Type': 'application/json',
+            'Accept': 'application/json'
+        }
+        refund_products = []
+        shipping_id = ""
+        for x in self.order_products:
+            refund_products.append({
+                'item_type': 'PRODUCT',
+                'item_id': x['id'],
+                'amount': x['price_inc_tax'],
+                'quantity': x['quantity'],
+                'reason': "APP REFUND"
+            })
+            shipping_id = x['order_address_id']
+        refund_products.append({
+            'item_type': 'SHIPPING',
+            'item_id': shipping_id,
+            'amount': self.shipping_cost_inc_tax
+        })
+        payload = {
+            'items': refund_products
+        }
+        response = requests.post(url, headers=headers, json=payload)
+        # data = response.json()
+        data = response.json()
+        pretty = response.content
+        pretty = json.loads(pretty)
+        pretty = json.dumps(pretty, indent=4)
+        print(pretty)
+        # To be continued
 
 
 def utc_to_local(utc_dt):

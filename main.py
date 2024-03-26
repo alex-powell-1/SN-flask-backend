@@ -7,6 +7,7 @@ from email import utils
 
 import flask
 import pandas
+import requests
 from docx.shared import Mm
 from docxtpl import DocxTemplate, InlineImage
 from flask import request
@@ -29,7 +30,12 @@ dev = False
 
 @app.route('/design', methods=["POST"])
 def get_service_information():
-    """Route for information request about company service. Sends user an email with PDF attachment
+    """Route for information request about company service.
+    Sends user an email with PDF attachment.
+    Sends sales manager lead info in sms text.
+    Prints lead info in office.
+    Adds lead details to Google Sheet
+    Logs lead details for use in chron jobs.
     and personalized details."""
     data = request.json
     first_name = data.get('first_name')
@@ -40,20 +46,25 @@ def get_service_information():
     interested_in = data.get('interested_in')
     street = data.get('street')
     city = data.get('city')
-    state = data.get('state')
+    state = data.get('state') if data.get('state') != 'State' else ""
     zip_code = data.get('zip_code')
+    comments = data.get('comments')
     # Concat the address
     address = f"{street}, {city}, {state}, {zip_code}"
 
-    if phone != "":
-        interests = ""
-        if interested_in is not None:
-            for x in interested_in:
-                interests += x
-                if len(interested_in) > 1:
-                    interests += ", "
-        # Send text notification To sales team manager
-        sms_engine.design_text(first_name, last_name, phone, interests, timeline)
+    # Concatenate user interests (for text and spreadsheet use)
+    interests = ""
+    if interested_in is not None:
+        for x in interested_in:
+            interests += x
+            if len(interested_in) > 1:
+                interests += ", "
+        if len(interested_in) > 1:
+            # remove last trailing characters (", ")
+            interests = interests[:-2]
+
+    # Send text notification To sales team manager
+    sms_engine.design_text(first_name, last_name, phone, interests, timeline)
 
     # Send email to client
     email_engine.design_email(first_name, email)
@@ -71,7 +82,8 @@ def get_service_information():
         'phone': phone,
         'interested_in': interested_in,
         'timeline': timeline,
-        'address': address
+        'address': address,
+        'comments': comments
     }
 
     doc.render(context)
@@ -85,12 +97,40 @@ def get_service_information():
     # Delete the unneeded Word document
     os.remove(ticket_name)
 
-    # Write Log
-    design_lead_data = [[str(datetime.now())[:-7], first_name, last_name, email, phone, interested_in, timeline]]
-    df = pandas.DataFrame(design_lead_data,
-                          columns=["date", "first_name", "last_name", "email", "phone", "interested_in", "timeline"])
+    # Upload to sheety API for spreadsheet use
 
+    sheety_post_body = {
+        "sheet1": {
+            "date": str(datetime.now()),
+            "first": first_name,
+            "last": last_name,
+            "phone": phone,
+            "email": email,
+            "interested": interests,
+            "timeline": timeline,
+            "street": street,
+            "city": city,
+            "state": state,
+            "zip": zip_code,
+            "comments": comments
+        }
+    }
+    try:
+        # Try block stands to decouple our implementation from API changes that might impact app.
+        requests.post(url=creds.sheety_design_url, headers=creds.sheety_header, json=sheety_post_body)
+    except Exception:
+        pass
+
+    # Write Log
+    design_lead_data = [[str(datetime.now())[:-7], first_name, last_name, email, phone, interested_in, timeline,
+                         street, city, state, zip_code, comments]]
+    df = pandas.DataFrame(design_lead_data,
+                          columns=["date", "first_name", "last_name", "email", "phone", "interested_in", "timeline",
+                                   "street", "city", "state", "zip_code", "comments"])
     log_engine.write_log(df, creds.lead_log)
+
+    # Write new customer to counterpoint
+    # need to write NCR Counterpoint API integration
 
     return "Your information has been received. Please check your email for more information from our team."
 
