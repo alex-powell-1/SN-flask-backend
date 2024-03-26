@@ -60,6 +60,3 @@ class QueryEngine:
         SLS_REP, CATEG_COD, STR_ID, TAX_COD, ALLOW_AR_CHRG, ALLOW_TKTS, NO_CR_LIM, 
         """
         pass
-
-
-db = QueryEngine()
