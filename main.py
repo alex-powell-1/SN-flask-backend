@@ -63,8 +63,16 @@ def get_service_information():
             # remove last trailing characters (", ")
             interests = interests[:-2]
 
+    # Log Details
+    design_lead_data = [[str(datetime.now())[:-7], first_name, last_name, email, phone, interested_in, timeline,
+                         street, city, state, zip_code, comments]]
+    df = pandas.DataFrame(design_lead_data,
+                          columns=["date", "first_name", "last_name", "email", "phone", "interested_in", "timeline",
+                                   "street", "city", "state", "zip_code", "comments"])
+    log_engine.write_log(df, creds.lead_log)
+
     # Send text notification To sales team manager
-    sms_engine.design_text(first_name, last_name, phone, interests, timeline)
+    sms_engine.design_text(first_name, last_name, phone, interests, timeline, address, comments)
 
     # Send email to client
     email_engine.design_email(first_name, email)
@@ -93,7 +101,7 @@ def get_service_information():
     # Print the file to default printer
     os.startfile(ticket_name, "print")
     # Delay while print job executes
-    time.sleep(3)
+    time.sleep(2)
     # Delete the unneeded Word document
     os.remove(ticket_name)
 
@@ -121,16 +129,10 @@ def get_service_information():
     except Exception:
         pass
 
-    # Write Log
-    design_lead_data = [[str(datetime.now())[:-7], first_name, last_name, email, phone, interested_in, timeline,
-                         street, city, state, zip_code, comments]]
-    df = pandas.DataFrame(design_lead_data,
-                          columns=["date", "first_name", "last_name", "email", "phone", "interested_in", "timeline",
-                                   "street", "city", "state", "zip_code", "comments"])
-    log_engine.write_log(df, creds.lead_log)
-
-    # Write new customer to counterpoint
-    # need to write NCR Counterpoint API integration
+    # # Write new customer to counterpoint
+    # query_engine.add_new_customer(first_name=first_name, last_name=last_name, phone_number=phone,
+    #                               email_address=email, street_address=street, city=city, state=state[0:10],
+    #                               zip_code=zip_code)
 
     return "Your information has been received. Please check your email for more information from our team."
 
@@ -274,6 +276,8 @@ def bc_orders():
             product_details = {'sku': item.item_no,
                                'name': item.descr,
                                'qty': x['quantity'],
+                               'base_price': x['base_price'],
+                               'base_total': x['base_total']
                                }
             product_list.append(product_details)
 
@@ -331,6 +335,9 @@ def bc_orders():
             doc.save(file_path)
             # Print the file to default printer
             os.startfile(file_path, "print")
+            # Delete barcode files
+            os.remove(f"./{barcode_filename}.png")
+            os.remove(f"./{order_id}.svg")
 
     return json.dumps({'success': True}), 200, {'ContentType': 'application/json'}
 

@@ -159,13 +159,15 @@ def convert_timezone(timestamp, from_zone, to_zone):
     return result_time
 
 
-def design_text(first_name, last_name, phone, interested_in, timeline):
+def design_text(first_name, last_name, phone, interested_in, timeline, address, comments):
     """Send text message to sales team mangers for customer followup"""
     name = f"{first_name} {last_name}".title()
     message = (f"{name} just requested a phone follow-up about {creds.service}.\n"
                f"Interested in: {interested_in}\n"
                f"Timeline: {timeline}\n"
-               f"Phone: {format_phone(phone)}")
+               f"Phone: {format_phone(phone)} \n"
+               f"Address: {address} \n"
+               f"Comments: {comments}")
     sms = SMSEngine()
     for k, v in creds.lead_recipient.items():
         sms.send_text(name=name,
