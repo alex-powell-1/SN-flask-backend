@@ -27,6 +27,9 @@ CORS(app)
 # When False, app is served by Waitress
 dev = False
 
+# When True, disables sms text and automatic printing in office
+test_mode = True
+
 
 @app.route('/design', methods=["POST"])
 def get_service_information():
@@ -64,7 +67,10 @@ def get_service_information():
             interests = interests[:-2]
 
     # Log Details
-    design_lead_data = [[str(datetime.now())[:-7], first_name, last_name, email, phone, interested_in, timeline,
+    # establish time for consistent logging
+    now = datetime.now()
+
+    design_lead_data = [[str(now)[:-7], first_name, last_name, email, phone, interested_in, timeline,
                          street, city, state, zip_code, comments]]
     df = pandas.DataFrame(design_lead_data,
                           columns=["date", "first_name", "last_name", "email", "phone", "interested_in", "timeline",
@@ -72,23 +78,28 @@ def get_service_information():
     log_engine.write_log(df, creds.lead_log)
 
     # Send text notification To sales team manager
-    try:
-        sms_engine.design_text(first_name, last_name, phone, interests, timeline, address, comments)
-    except Exception as err:
-        print("Error:")
-        print(err)
+    if not test_mode:
+        try:
+            sms_engine.design_text(first_name, last_name, phone, interests, timeline, address, comments)
+        except Exception as err:
+            error_type = "sms"
+            error_data = [[str(now)[:-7], error_type, err]]
+            df = pandas.DataFrame(error_data, columns=["date", "error_type", "message"])
+            log_engine.write_log(df, f"{creds.lead_error_log}/error_{now.strftime("%m_%d_%y_%H_%M_%S")}.csv")
+            print(err)
 
     # Send email to client
     try:
         email_engine.design_email(first_name, email)
     except Exception as err:
-        print("Error:")
+        error_type = "email"
+        error_data = [[str(now)[:-7], error_type, err]]
+        df = pandas.DataFrame(error_data, columns=["date", "error_type", "message"])
+        log_engine.write_log(df, f"{creds.lead_error_log}/error_{now.strftime("%m_%d_%y_%H_%M_%S")}.csv")
         print(err)
 
     # Print lead details for in-store use
 
-    # establish time for consistent logging
-    now = datetime.now()
     # Create the Word document
     try:
         doc = DocxTemplate("templates/lead_template.docx")
@@ -110,14 +121,17 @@ def get_service_information():
         # Save the rendered file for printing
         doc.save(f"./{ticket_name}")
         # Print the file to default printer
-        os.startfile(ticket_name, "print")
+        if not test_mode:
+            os.startfile(ticket_name, "print")
         # Delay while print job executes
         time.sleep(2)
         # Delete the unneeded Word document
         os.remove(ticket_name)
     except Exception as err:
-        print("Error:")
-        print(err)
+        error_type = "lead_ticket"
+        error_data = [[str(now)[:-7], error_type, err]]
+        df = pandas.DataFrame(error_data, columns=["date", "error_type", "message"])
+        log_engine.write_log(df, f"{creds.lead_error_log}/error_{now.strftime("%m_%d_%y_%H_%M_%S")}.csv")
 
     # Upload to sheety API for spreadsheet use
 
@@ -141,8 +155,10 @@ def get_service_information():
         # Try block stands to decouple our implementation from API changes that might impact app.
         requests.post(url=creds.sheety_design_url, headers=creds.sheety_header, json=sheety_post_body)
     except Exception as err:
-        print("Error:")
-        print(err)
+        error_type = "spreadsheet"
+        error_data = [[str(now)[:-7], error_type, err]]
+        df = pandas.DataFrame(error_data, columns=["date", "error_type", "message"])
+        log_engine.write_log(df, f"{creds.lead_error_log}/error_{now.strftime("%m_%d_%y_%H_%M_%S")}.csv")
 
     return "Your information has been received. Please check your email for more information from our team."
 
@@ -253,9 +269,11 @@ def incoming_sms():
     full_name, category = sms_engine.lookup_customer_data(sms_engine.format_phone(from_phone, mode="counterpoint"))
 
     log_data = [[date, to_phone, from_phone, body, full_name, category.title(), media_url]]
+
     # Write dataframe to CSV file
     df = pandas.DataFrame(log_data, columns=["date", "to_phone", "from_phone", "body", "name", "category", "media"])
     log_engine.write_log(df, creds.incoming_sms_log)
+
     # Return Response to Twilio
     resp = MessagingResponse()
     return str(resp)

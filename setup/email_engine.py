@@ -32,7 +32,7 @@ def send_html_email(from_name, from_address, recipients_list, subject, content, 
                 msg.attach(msg_logo)
 
         if attachment:
-            with open(f"./{creds.pdf_attachment}", 'rb') as file:
+            with open(f"./{creds.design_pdf_attachment}", 'rb') as file:
                 pdf = file.read()
 
                 attached_file = MIMEApplication(_data=pdf,
@@ -40,7 +40,7 @@ def send_html_email(from_name, from_address, recipients_list, subject, content, 
 
                 attached_file.add_header(_name='content-disposition',
                                          _value='attachment',
-                                         filename=f"{creds.pdf_attachment}")
+                                         filename=f"{creds.design_pdf_name}")
                 msg.attach(attached_file)
 
         with smtplib.SMTP("smtp.gmail.com", port=587) as connection:
