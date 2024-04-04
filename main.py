@@ -72,44 +72,58 @@ def get_service_information():
     log_engine.write_log(df, creds.lead_log)
 
     # Send text notification To sales team manager
-    sms_engine.design_text(first_name, last_name, phone, interests, timeline, address, comments)
+    try:
+        sms_engine.design_text(first_name, last_name, phone, interests, timeline, address, comments)
+    except Exception as err:
+        print("Error:")
+        print(err)
 
     # Send email to client
-    email_engine.design_email(first_name, email)
+    try:
+        email_engine.design_email(first_name, email)
+    except Exception as err:
+        print("Error:")
+        print(err)
 
     # Print lead details for in-store use
 
+    # establish time for consistent logging
+    now = datetime.now()
     # Create the Word document
-    doc = DocxTemplate("templates/lead_template.docx")
+    try:
+        doc = DocxTemplate("templates/lead_template.docx")
 
-    context = {
-        # Product Details
-        'date': datetime.now().strftime("%m/%d/%Y %H:%M %p"),
-        'name': first_name + " " + last_name,
-        'email': email,
-        'phone': phone,
-        'interested_in': interested_in,
-        'timeline': timeline,
-        'address': address,
-        'comments': comments
-    }
+        context = {
+            # Product Details
+            'date': now.strftime("%m/%d/%Y %H:%M %p"),
+            'name': first_name + " " + last_name,
+            'email': email,
+            'phone': phone,
+            'interested_in': interested_in,
+            'timeline': timeline,
+            'address': address,
+            'comments': comments
+        }
 
-    doc.render(context)
-    ticket_name = f"lead_{datetime.now().strftime("%m_%d_%y_%H_%M_%S")}.docx"
-    # Save the rendered file for printing
-    doc.save(f"./{ticket_name}")
-    # Print the file to default printer
-    os.startfile(ticket_name, "print")
-    # Delay while print job executes
-    time.sleep(2)
-    # Delete the unneeded Word document
-    os.remove(ticket_name)
+        doc.render(context)
+        ticket_name = f"lead_{now.strftime("%m_%d_%y_%H_%M_%S")}.docx"
+        # Save the rendered file for printing
+        doc.save(f"./{ticket_name}")
+        # Print the file to default printer
+        os.startfile(ticket_name, "print")
+        # Delay while print job executes
+        time.sleep(2)
+        # Delete the unneeded Word document
+        os.remove(ticket_name)
+    except Exception as err:
+        print("Error:")
+        print(err)
 
     # Upload to sheety API for spreadsheet use
 
     sheety_post_body = {
         "sheet1": {
-            "date": str(datetime.now()),
+            "date": str(now),
             "first": first_name,
             "last": last_name,
             "phone": phone,
@@ -126,13 +140,9 @@ def get_service_information():
     try:
         # Try block stands to decouple our implementation from API changes that might impact app.
         requests.post(url=creds.sheety_design_url, headers=creds.sheety_header, json=sheety_post_body)
-    except Exception:
-        pass
-
-    # # Write new customer to counterpoint
-    # query_engine.add_new_customer(first_name=first_name, last_name=last_name, phone_number=phone,
-    #                               email_address=email, street_address=street, city=city, state=state[0:10],
-    #                               zip_code=zip_code)
+    except Exception as err:
+        print("Error:")
+        print(err)
 
     return "Your information has been received. Please check your email for more information from our team."
 
