@@ -55,7 +55,6 @@ class Product:
         self.custom_field_size = ""
         self.search_key = ""
         self.sort_order = 0
-        self.item_url = ""
         self.preorder_message = ""
         self.availability_description = ""
         self.e_comm_category = ""
@@ -140,23 +139,6 @@ class Product:
                 self.featured = x[47]
                 self.product_id = self.get_product_id()
                 self.variant_id = self.get_variant_id()
-                # ITEM URL
-                # If data already on the local server, use it
-                if x[42] is not None:
-                    self.item_url = x[42]
-                else:
-                    # Else, get live URL from API
-                    bc_data = bc_get_product(self.product_id)
-                    if bc_data is not None:
-                        # Get live url from big, assign to object
-                        self.item_url = creds.company_url + bc_data['data']['custom_url']['url']
-                        # Store in SQL for future, faster access
-                        query = f"""
-                        UPDATE IM_ITEM
-                        SET USR_PROF_ALPHA_18 = '{self.item_url}'
-                        WHERE ITEM_NO = '{self.item_no}'
-                        """
-                        db.query_db(query, commit=True)
 
         else:
             return "No Item Matching that SKU"

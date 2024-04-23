@@ -32,7 +32,7 @@ def send_html_email(from_name, from_address, recipients_list, subject, content, 
                 msg.attach(msg_logo)
 
         if attachment:
-            with open(f"../{creds.design_pdf_attachment}", 'rb') as file:
+            with open(f"./{creds.design_pdf_attachment}", 'rb') as file:
                 pdf = file.read()
 
                 attached_file = MIMEApplication(_data=pdf,
@@ -55,7 +55,7 @@ def send_html_email(from_name, from_address, recipients_list, subject, content, 
 def design_email(first_name, email):
     """Send email and PDF to customer in response to request for design information."""
     recipient = {first_name: email}
-    with open("../templates/email_body.html", "r") as file:
+    with open("./templates/email_body.html", "r") as file:
         template_str = file.read()
 
     jinja_template = Template(template_str)

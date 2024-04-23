@@ -221,26 +221,26 @@ class Order:
                     "code": None
                 }
 
-                # Get Shipping Addresses
-                url = f"https://api.bigcommerce.com/stores/{creds.big_store_hash}/v2/orders/{self.order_id}/shipping_addresses"
-                response = (requests.get(url, headers=headers))
-                if response.status_code == 200:
-                    data = response.json()
-                    self.shipping_first_name = data[0]['first_name']
-                    self.shipping_last_name = data[0]['last_name']
-                    if data[0]['street_2'] == '':
-                        self.shipping_street_address = data[0]['street_1']
-                    else:
-                        self.shipping_street_address = (data[0]['street_1'] + "\n" +
-                                                        data[0]['street_2'])
-                    # self.shipping_street_1 = data[0]['street_1']
-                    # self.shipping_street_2 = data[0]['street_2']
-                    self.shipping_city = data[0]['city']
-                    self.shipping_state = data[0]['state']
-                    self.shipping_zip = data[0]['zip']
-                    self.shipping_email = data[0]['email']
-                    self.shipping_phone = format_phone(data[0]['phone'], mode='clickable')
-                    self.shipping_method = data[0]['shipping_method']
+            # Get Shipping Addresses
+            url = f"https://api.bigcommerce.com/stores/{creds.big_store_hash}/v2/orders/{self.order_id}/shipping_addresses"
+            response = (requests.get(url, headers=headers))
+            if response.status_code == 200:
+                data = response.json()
+                self.shipping_first_name = data[0]['first_name']
+                self.shipping_last_name = data[0]['last_name']
+                if data[0]['street_2'] == '':
+                    self.shipping_street_address = data[0]['street_1']
+                else:
+                    self.shipping_street_address = (data[0]['street_1'] + "\n" +
+                                                    data[0]['street_2'])
+                # self.shipping_street_1 = data[0]['street_1']
+                # self.shipping_street_2 = data[0]['street_2']
+                self.shipping_city = data[0]['city']
+                self.shipping_state = data[0]['state']
+                self.shipping_zip = data[0]['zip']
+                self.shipping_email = data[0]['email']
+                self.shipping_phone = format_phone(data[0]['phone'], mode='clickable')
+                self.shipping_method = data[0]['shipping_method']
 
     def refund_order(self):
         from setup import creds

@@ -17,16 +17,23 @@ def main():
     connection = pika.BlockingConnection(pika.ConnectionParameters(host='localhost'))
     channel = connection.channel()
 
-    channel.queue_declare(queue='bc_orders')
+    channel.queue_declare(queue='bc_orders', durable=True)
+    print(' [*] Waiting for messages. To exit press CTRL+C')
 
     def callback(ch, method, properties, body):
         now = datetime.now()
         order_id = body.decode()
+
+        # Log incoming order for debugging
+        error_data = [[str(now)[:-7], order_id]]
+        df = pandas.DataFrame(error_data, columns=["date", "order_id"])
+        log_engine.write_log(df, log_location=creds.webhook_order_log)
+
         # Create order object
         try:
             order = Order(order_id)
             # Filter out DECLINED payments
-            if order.payment_status != 'declined' or order.payment_status != "":
+            if order.payment_status not in ['declined', ""]:
                 bc_date = order.date_created
                 # Format Date and Time
                 dt_date = utils.parsedate_to_datetime(bc_date)
@@ -109,14 +116,14 @@ def main():
             error_type = "general catch"
             error_data = [[str(now)[:-7], error_type, err]]
             df = pandas.DataFrame(error_data, columns=["date", "error_type", "message"])
-            log_engine.write_log(df, f"{creds.lead_error_log}/general_error_{now.strftime("%m_%d_%y_%H_%M_%S")}.csv")
+            log_engine.write_log(df, f"{creds.order_error_log}/general_error_{now.strftime("%m_%d_%y_%H_%M_%S")}.csv")
             print(err)
 
         ch.basic_ack(delivery_tag=method.delivery_tag)
 
+    channel.basic_qos(prefetch_count=1)
     channel.basic_consume(queue='bc_orders', on_message_callback=callback)
 
-    print(' [*] Waiting for messages. To exit press CTRL+C')
     channel.start_consuming()
 
 

@@ -1,27 +1,18 @@
 import json
-import os
-import time
 import urllib.parse
 from datetime import datetime
-from email import utils
-import pika
-import sys
 
 import flask
 import pandas
-import requests
-from docx.shared import Mm
-from docxtpl import DocxTemplate, InlineImage
+import pika
 from flask import request
 from flask_cors import CORS
 from jinja2 import Template
 from twilio.twiml.messaging_response import MessagingResponse
 from waitress import serve
 
-from setup import barcode_engine
-from setup import creds, email_engine, sms_engine, product_engine
+from setup import creds, email_engine, sms_engine
 from setup import log_engine
-from setup.order_engine import Order, utc_to_local
 
 app = flask.Flask(__name__)
 CORS(app)
@@ -35,15 +26,17 @@ test_mode = False
 
 @app.route('/design', methods=["POST"])
 def get_service_information():
-    """Route for information request about company service. Sends JSON to RabbitMQ for processing."""
+    """Route for information request about company service. Sends JSON to RabbitMQ for asynchronous processing."""
     data = request.json
     payload = json.dumps(data)
     connection = pika.BlockingConnection(pika.ConnectionParameters('localhost'))
     channel = connection.channel()
-    channel.queue_declare(queue='design_info')
+    channel.queue_declare(queue='design_info', durable=True)
+
     channel.basic_publish(exchange='',
                           routing_key='design_info',
-                          body=payload)
+                          body=payload,
+                          properties=pika.BasicProperties(delivery_mode=pika.DeliveryMode.Persistent))
     connection.close()
 
     return "Your information has been received. Please check your email for more information from our team."
@@ -77,8 +70,7 @@ def stock_notification():
 
 @app.route('/newsletter', methods=['POST'])
 def newsletter_signup():
-    """Route for website pop-up. Offers user a coupon and adds their information to a csv.
-    NOTES: ADD check for email already on file!"""
+    """Route for website pop-up. Offers user a coupon and adds their information to a csv."""
     data = request.json
     email = data.get('email')
     try:
@@ -144,6 +136,10 @@ def incoming_sms():
     to_phone = msg['To'][0]
     body = msg['Body'][0]
 
+    # Unsubscribe user from SMS marketing
+    if body.lower() == "stop":
+        sms_engine.unsubscribe_from_sms(from_phone)
+
     # Get MEDIA URL for MMS Messages
     if int(msg['NumMedia'][0]) > 0:
         media = msg['MediaUrl0'][0]
@@ -167,104 +163,27 @@ def incoming_sms():
 
 @app.route('/bc', methods=['POST'])
 def bc_orders():
-    """Webhook route for incoming orders. Renders pick/loading ticket. Automatically prints"""
+    """Webhook route for incoming orders. Sends to RabbitMQ queue for asynchronous processing"""
     response_data = request.get_json()
     order_id = response_data['data']['id']
-    now = datetime.now()
-    # Create order object
-    try:
-        order = Order(order_id)
-        # Filter out DECLINED payments
-        if order.payment_status != 'declined' and order.payment_status != "":
-            bc_date = order.date_created
-            # Format Date and Time
-            dt_date = utils.parsedate_to_datetime(bc_date)
-            date = utc_to_local(dt_date).strftime("%m/%d/%Y")  # ex. 04/24/2024
-            time = utc_to_local(dt_date).strftime("%I:%M:%S %p")  # ex. 02:34:24 PM
-            products = order.order_products
-            product_list = []
-            gift_card_only = True
-            for x in products:
-                if x['type'] == 'physical':
-                    gift_card_only = False
-                item = product_engine.Product(x['sku'])
-                product_details = {'sku': item.item_no,
-                                   'name': item.descr,
-                                   'qty': x['quantity'],
-                                   'base_price': x['base_price'],
-                                   'base_total': x['base_total']
-                                   }
-                product_list.append(product_details)
 
-            # FILTER OUT GIFT CARDS (NO PHYSICAL PRODUCTS)
-            if not gift_card_only:
-                # Create Barcode
-                barcode_filename = 'barcode'
-                barcode_engine.generate_barcode(data=order_id, filename=barcode_filename)
-                # Create the Word document
-                doc = DocxTemplate("./templates/ticket_template.docx")
-                barcode = InlineImage(doc, f'./{barcode_filename}.png', height=Mm(15))  # width in mm
-                context = {
-                    # Company Details
-                    'company_name': creds.company_name,
-                    'co_address': creds.company_address,
-                    'co_phone': creds.company_phone,
-                    # Order Details
-                    'order_number': order_id,
-                    'order_date': date,
-                    'order_time': time,
-                    'order_subtotal': float(order.subtotal_inc_tax),
-                    'order_shipping': float(order.shipping_cost_inc_tax),
-                    'order_total': float(order.total_inc_tax),
-                    # Customer Billing
-                    'cb_name': order.billing_first_name + " " + order.billing_last_name,
-                    'cb_phone': order.billing_phone,
-                    'cb_email': order.billing_email,
-                    'cb_street': order.billing_street_address,
-                    'cb_city': order.billing_city,
-                    'cb_state': order.billing_state,
-                    'cb_zip': order.billing_zip,
-                    # Customer Shipping
-                    'shipping_method': order.shipping_method,
-                    'cs_name': order.shipping_first_name + " " + order.shipping_last_name,
-                    'cs_phone': order.shipping_phone,
-                    'cs_email': order.shipping_email,
-                    'cs_street': order.shipping_street_address,
-                    'cs_city': order.shipping_city,
-                    'cs_state': order.shipping_state,
-                    'cs_zip': order.shipping_zip,
-                    # Product Details
-                    'number_of_items': order.items_total,
-                    'ticket_notes': order.customer_message,
-                    'products': product_list,
-                    'coupon_code': order.order_coupons['code'],
-                    'coupon_discount': float(order.coupon_discount),
-                    'loyalty': float(order.store_credit_amount),
-                    'gc_amount': float(order.gift_certificate_amount),
-                    'barcode': barcode
-                }
-                doc.render(context)
-                ticket_name = f"ticket_{order_id}_{datetime.now().strftime("%m_%d_%y_%H_%M_%S")}.docx"
-                file_path = creds.ticket_location + ticket_name
-                doc.save(file_path)
-                # Print the file to default printer
-                os.startfile(file_path, "print")
-                # Delete barcode files
-                os.remove(f"./{barcode_filename}.png")
-                os.remove(f"./{order_id}.svg")
-    except Exception as err:
-        error_type = "general catch"
-        error_data = [[str(now)[:-7], error_type, err]]
-        df = pandas.DataFrame(error_data, columns=["date", "error_type", "message"])
-        log_engine.write_log(df, f"{creds.lead_error_log}/general_error_{now.strftime("%m_%d_%y_%H_%M_%S")}.csv")
-        print(err)
+    connection = pika.BlockingConnection(pika.ConnectionParameters('localhost'))
+    channel = connection.channel()
+
+    channel.queue_declare(queue='bc_orders', durable=True)
+
+    channel.basic_publish(exchange='',
+                          routing_key='bc_orders',
+                          body=str(order_id),
+                          properties=pika.BasicProperties(delivery_mode=pika.DeliveryMode.Persistent))
+    connection.close()
 
     return json.dumps({'success': True}), 200, {'ContentType': 'application/json'}
 
 
 if __name__ == '__main__':
     if dev:
-        app.run(debug=True, port=9999)
+        app.run(debug=True, port=creds.flask_port)
     else:
         print("Flask Server Running")
-        serve(app, host='localhost', port=9999)
+        serve(app, host='localhost', port=creds.flask_port)

@@ -19,7 +19,8 @@ def main():
     connection = pika.BlockingConnection(pika.ConnectionParameters(host='localhost'))
     channel = connection.channel()
 
-    channel.queue_declare(queue='design_info')
+    channel.queue_declare(queue='design_info', durable=True)
+    print(' [*] Waiting for messages. To exit press CTRL+C')
 
     def callback(ch, method, properties, body):
         json_body = json.loads(body.decode())
@@ -29,11 +30,12 @@ def main():
         phone = sms_engine.format_phone(json_body['phone'], mode='counterpoint')
         timeline = json_body['timeline']
         interested_in = json_body['interested_in']
-        street = json_body['street']
-        city = json_body['city']
+        street = str(json_body['street']).replace(",", "")
+        city = str(json_body['city']).replace(",", "")
         state = json_body['state'] if json_body['state'] != 'State' else ""
-        zip_code = json_body['zip_code']
-        comments = json_body['comments']
+        zip_code = str(json_body['zip_code']).replace(",", "")
+        # comments = str(json_body['comments']).replace(",", "")
+        comments = str(json_body['comments']).replace('"', '""')
         # Concat the address
         address = f"{street}, {city}, {state}, {zip_code}"
 
@@ -60,15 +62,16 @@ def main():
         log_engine.write_log(df, creds.lead_log)
 
         # Send text notification To sales team manager
-        if not test_mode:
-            try:
-                sms_engine.design_text(first_name, last_name, phone, interests, timeline, address, comments)
-            except Exception as err:
-                error_type = "sms"
-                error_data = [[str(now)[:-7], error_type, err]]
-                df = pandas.DataFrame(error_data, columns=["date", "error_type", "message"])
-                log_engine.write_log(df, f"{creds.lead_error_log}/error_{now.strftime("%m_%d_%y_%H_%M_%S")}.csv")
-                print(err)
+
+        try:
+            sms_engine.design_text(first_name, last_name, phone, interests, timeline,
+                                   address, comments, test_mode=test_mode)
+        except Exception as err:
+            error_type = "sms"
+            error_data = [[str(now)[:-7], error_type, err]]
+            df = pandas.DataFrame(error_data, columns=["date", "error_type", "message"])
+            log_engine.write_log(df, f"{creds.lead_error_log}/error_{now.strftime("%m_%d_%y_%H_%M_%S")}.csv")
+            print(err)
 
         # Send email to client
         try:
@@ -95,7 +98,7 @@ def main():
                 'interested_in': interested_in,
                 'timeline': timeline,
                 'address': address,
-                'comments': comments
+                'comments': comments.replace('""', '"')
             }
 
             doc.render(context)
@@ -103,8 +106,7 @@ def main():
             # Save the rendered file for printing
             doc.save(f"./{ticket_name}")
             # Print the file to default printer
-            if not test_mode:
-                os.startfile(ticket_name, "print")
+            os.startfile(ticket_name, "print")
             # Delay while print job executes
             time.sleep(4)
             # Delete the unneeded Word document
@@ -146,9 +148,9 @@ def main():
 
         ch.basic_ack(delivery_tag=method.delivery_tag)
 
+    channel.basic_qos(prefetch_count=1)
     channel.basic_consume(queue='design_info', on_message_callback=callback)
 
-    print(' [*] Waiting for messages. To exit press CTRL+C')
     channel.start_consuming()
 
 

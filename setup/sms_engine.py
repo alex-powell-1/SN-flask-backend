@@ -1,11 +1,14 @@
-from setup import creds
-from twilio.rest import Client
 from datetime import datetime
-from dateutil import tz
-from setup.query_engine import QueryEngine
-import pytz
-from twilio.base.exceptions import TwilioRestException
+
 import pandas
+import pytz
+from dateutil import tz
+from twilio.base.exceptions import TwilioRestException
+from twilio.rest import Client
+
+from setup import creds
+from setup.query_engine import QueryEngine
+from setup import log_engine
 
 est = pytz.timezone('US/Eastern')
 utc = pytz.utc
@@ -53,12 +56,7 @@ def create_sms_log(name, phone, sent_message, response, log_location):
     df = pandas.DataFrame(log_data, columns=["date", "name", "to_phone", "body", "response"])
     # Looks for file. If it has been deleted, it will recreate.
 
-    try:
-        pandas.read_csv(log_location)
-    except FileNotFoundError:
-        df.to_csv(log_location, mode='a', header=True, index=False)
-    else:
-        df.to_csv(log_location, mode='a', header=False, index=False)
+    log_engine.write_log(df, log_location)
 
 
 def format_phone(phone_number, mode="clickable", prefix=False):
@@ -137,7 +135,8 @@ def write_all_twilio_messages_to_share():
             for media in record.media.list():
                 media_url = 'https://api.twilio.com' + media.uri[:-5]  # Strip off the '.json'
                 # Add authorization header
-                media_url = media_url[0:8] + creds.twilio_account_sid + ":" + creds.twilio_auth_token + "@" + media_url[8:]
+                media_url = media_url[0:8] + creds.twilio_account_sid + ":" + creds.twilio_auth_token + "@" + media_url[
+                                                                                                              8:]
 
         message_list.append([local_datetime,
                              creds.twilio_phone_number,
@@ -159,7 +158,7 @@ def convert_timezone(timestamp, from_zone, to_zone):
     return result_time
 
 
-def design_text(first_name, last_name, phone, interested_in, timeline, address, comments):
+def design_text(first_name, last_name, phone, interested_in, timeline, address, comments, test_mode=False):
     """Send text message to sales team mangers for customer followup"""
     name = f"{first_name} {last_name}".title()
     message = (f"{name} just requested a phone follow-up about {creds.service}.\n"
@@ -169,9 +168,33 @@ def design_text(first_name, last_name, phone, interested_in, timeline, address, 
                f"Address: {address} \n"
                f"Comments: {comments}")
     sms = SMSEngine()
-    for k, v in creds.lead_recipient.items():
-        sms.send_text(name=name,
-                      to_phone=format_phone(v, prefix=True),
-                      message=message,
-                      log_location=creds.sms_log,
-                      create_log=True)
+    if test_mode:
+        for k, v in creds.test_recipient.items():
+            sms.send_text(name=name,
+                          to_phone=format_phone(v, prefix=True),
+                          message=message,
+                          log_location=creds.sms_log,
+                          create_log=True)
+    else:
+        for k, v in creds.lead_recipient.items():
+            sms.send_text(name=name,
+                          to_phone=format_phone(v, prefix=True),
+                          message=message,
+                          log_location=creds.sms_log,
+                          create_log=True)
+
+
+def unsubscribe_from_sms(phone_number):
+    query = f"""
+    UPDATE AR_CUST
+    SET INCLUDE_IN_MARKETING_MAILOUTS = 'N'
+    WHERE PHONE_1 = '{phone_number}' OR PHONE_2 = '{phone_number}'
+    """
+    db = QueryEngine()
+    db.query_db(query=query, commit=True)
+
+    date = f"{datetime.now():%m-%d-%Y %H:%M:%S}"
+
+    log_data = [[date, phone_number]]
+    df = pandas.DataFrame(log_data, columns=["date", "phone"])
+    log_engine.write_log(df, creds.sms_unsubscribe)
