@@ -1,5 +1,6 @@
 import os
 import sys
+import time
 from datetime import datetime
 from email import utils
 
@@ -7,20 +8,28 @@ import pandas
 import pika
 from docx.shared import Mm
 from docxtpl import DocxTemplate, InlineImage
+from pika.exceptions import AMQPConnectionError
 
 from setup import barcode_engine
 from setup import creds, product_engine, log_engine
 from setup.order_engine import Order, utc_to_local
 
 
-def main():
-    connection = pika.BlockingConnection(pika.ConnectionParameters(host='localhost'))
-    channel = connection.channel()
+class RabbitMQConsumer:
+    def __init__(self, queue_name, host='localhost'):
+        self.queue_name = queue_name
+        self.host = host
+        self.connection = None
+        self.channel = None
 
-    channel.queue_declare(queue='bc_orders', durable=True)
-    print(' [*] Waiting for messages. To exit press CTRL+C')
+    def connect(self):
+        parameters = pika.ConnectionParameters(self.host)
+        self.connection = pika.BlockingConnection(parameters)
+        self.channel = self.connection.channel()
+        self.channel.queue_declare(queue=self.queue_name, durable=True)
 
-    def callback(ch, method, properties, body):
+    def callback(self, ch, method, properties, body):
+        log_file = open(creds.bc_orders_log, "a")
         now = datetime.now()
         order_id = body.decode()
 
@@ -30,7 +39,9 @@ def main():
         log_engine.write_log(df, log_location=creds.webhook_order_log)
 
         # Create order object
+        print(f"Beginning processing for Order #{order_id}", file=log_file)
         try:
+            print(f"Getting Order Details", file=log_file)
             order = Order(order_id)
             # Filter out DECLINED payments
             if order.payment_status not in ['declined', ""]:
@@ -58,77 +69,120 @@ def main():
                 if not gift_card_only:
                     # Create Barcode
                     barcode_filename = 'barcode'
-                    barcode_engine.generate_barcode(data=order_id, filename=barcode_filename)
-                    # Create the Word document
-                    doc = DocxTemplate("./templates/ticket_template.docx")
-                    barcode = InlineImage(doc, f'./{barcode_filename}.png', height=Mm(15))  # width in mm
-                    context = {
-                        # Company Details
-                        'company_name': creds.company_name,
-                        'co_address': creds.company_address,
-                        'co_phone': creds.company_phone,
-                        # Order Details
-                        'order_number': order_id,
-                        'order_date': date,
-                        'order_time': time,
-                        'order_subtotal': float(order.subtotal_inc_tax),
-                        'order_shipping': float(order.shipping_cost_inc_tax),
-                        'order_total': float(order.total_inc_tax),
-                        # Customer Billing
-                        'cb_name': order.billing_first_name + " " + order.billing_last_name,
-                        'cb_phone': order.billing_phone,
-                        'cb_email': order.billing_email,
-                        'cb_street': order.billing_street_address,
-                        'cb_city': order.billing_city,
-                        'cb_state': order.billing_state,
-                        'cb_zip': order.billing_zip,
-                        # Customer Shipping
-                        'shipping_method': order.shipping_method,
-                        'cs_name': order.shipping_first_name + " " + order.shipping_last_name,
-                        'cs_phone': order.shipping_phone,
-                        'cs_email': order.shipping_email,
-                        'cs_street': order.shipping_street_address,
-                        'cs_city': order.shipping_city,
-                        'cs_state': order.shipping_state,
-                        'cs_zip': order.shipping_zip,
-                        # Product Details
-                        'number_of_items': order.items_total,
-                        'ticket_notes': order.customer_message,
-                        'products': product_list,
-                        'coupon_code': order.order_coupons['code'],
-                        'coupon_discount': float(order.coupon_discount),
-                        'loyalty': float(order.store_credit_amount),
-                        'gc_amount': float(order.gift_certificate_amount),
-                        'barcode': barcode
-                    }
+                    print("Creating barcode", file=log_file)
+                    try:
+                        barcode_engine.generate_barcode(data=order_id, filename=barcode_filename)
+                    except Exception as err:
+                        error_type = "barcode"
+                        print(f"Error ({error_type}): {err}", file=log_file)
+                    else:
+                        print(f"Creating barcode - Success at {datetime.now():%H:%M:%S}", file=log_file)
 
-                    doc.render(context)
-                    ticket_name = f"ticket_{order_id}_{datetime.now().strftime("%m_%d_%y_%H_%M_%S")}.docx"
-                    file_path = creds.ticket_location + ticket_name
-                    doc.save(file_path)
-                    # Print the file to default printer
-                    os.startfile(file_path, "print")
-                    # Delete barcode files
-                    os.remove(f"./{barcode_filename}.png")
-                    os.remove(f"./{order_id}.svg")
+                    print("Creating Word Document", file=log_file)
+                    # Create the Word document
+                    try:
+                        doc = DocxTemplate("./templates/ticket_template.docx")
+                        barcode = InlineImage(doc, f'./{barcode_filename}.png', height=Mm(15))  # width in mm
+                        context = {
+                            # Company Details
+                            'company_name': creds.company_name,
+                            'co_address': creds.company_address,
+                            'co_phone': creds.company_phone,
+                            # Order Details
+                            'order_number': order_id,
+                            'order_date': date,
+                            'order_time': time,
+                            'order_subtotal': float(order.subtotal_inc_tax),
+                            'order_shipping': float(order.shipping_cost_inc_tax),
+                            'order_total': float(order.total_inc_tax),
+                            # Customer Billing
+                            'cb_name': order.billing_first_name + " " + order.billing_last_name,
+                            'cb_phone': order.billing_phone,
+                            'cb_email': order.billing_email,
+                            'cb_street': order.billing_street_address,
+                            'cb_city': order.billing_city,
+                            'cb_state': order.billing_state,
+                            'cb_zip': order.billing_zip,
+                            # Customer Shipping
+                            'shipping_method': order.shipping_method,
+                            'cs_name': order.shipping_first_name + " " + order.shipping_last_name,
+                            'cs_phone': order.shipping_phone,
+                            'cs_email': order.shipping_email,
+                            'cs_street': order.shipping_street_address,
+                            'cs_city': order.shipping_city,
+                            'cs_state': order.shipping_state,
+                            'cs_zip': order.shipping_zip,
+                            # Product Details
+                            'number_of_items': order.items_total,
+                            'ticket_notes': order.customer_message,
+                            'products': product_list,
+                            'coupon_code': order.order_coupons['code'],
+                            'coupon_discount': float(order.coupon_discount),
+                            'loyalty': float(order.store_credit_amount),
+                            'gc_amount': float(order.gift_certificate_amount),
+                            'barcode': barcode
+                        }
+
+                        doc.render(context)
+                        ticket_name = f"ticket_{order_id}_{datetime.now().strftime("%m_%d_%y_%H_%M_%S")}.docx"
+                        file_path = creds.ticket_location + ticket_name
+                        doc.save(file_path)
+                    except Exception as err:
+                        error_type = "Word Document"
+                        print(f"Error ({error_type}): {err}", file=log_file)
+                    else:
+                        print(f"Creating Word Document - Success at {datetime.now():%H:%M:%S}", file=log_file)
+                        try:
+                            # Print the file to default printer
+                            os.startfile(file_path, "print")
+                        except Exception as err:
+                            error_type = "Printing"
+                            print(f"Error ({error_type}): {err}", file=log_file)
+                        else:
+                            print(f"Printing - Success at {datetime.now():%H:%M:%S}", file=log_file)
+
+                        print(f"Deleting barcode files", file=log_file)
+
+                        # Delete barcode files
+                        try:
+                            os.remove(f"./{barcode_filename}.png")
+                            os.remove(f"./{order_id}.svg")
+                        except Exception as err:
+                            error_type = "Deleting Barcode"
+                            print(f"Error ({error_type}): {err}", file=log_file)
+                        else:
+                            print(f"Deleting Barcode - Success at {datetime.now():%H:%M:%S}", file=log_file)
+                else:
+                    print(f"Skipping Order #{order_id}: Gift Card Only", file=log_file)
+            else:
+                print(f"Skipping Order #{order_id}: Payment Status: {order.payment_status}", file=log_file)
 
         except Exception as err:
-            error_type = "general catch"
-            error_data = [[str(now)[:-7], error_type, err]]
-            df = pandas.DataFrame(error_data, columns=["date", "error_type", "message"])
-            log_engine.write_log(df, f"{creds.order_error_log}/general_error_{now.strftime("%m_%d_%y_%H_%M_%S")}.csv")
-            print(err)
-
-        ch.basic_ack(delivery_tag=method.delivery_tag)
-
-    channel.basic_qos(prefetch_count=1)
-    channel.basic_consume(queue='bc_orders', on_message_callback=callback)
-
-    channel.start_consuming()
+            error_type = "General Catch"
+            print(f"Error ({error_type}): {err}", file=log_file)
+        else:
+            ch.basic_ack(delivery_tag=method.delivery_tag)
+        finally:
+            log_file.close()
 
 
-if __name__ == '__main__':
-    try:
-        main()
-    except KeyboardInterrupt:
-        sys.exit(0)
+    def start_consuming(self):
+        while True:
+            try:
+                self.connect()
+                self.channel.basic_consume(queue=self.queue_name, on_message_callback=self.callback)
+                print('Waiting for messages. To exit press CTRL+C')
+                self.channel.start_consuming()
+            except KeyboardInterrupt:
+                sys.exit(0)
+            except pika.exceptions.AMQPConnectionError:
+                print("Connection lost. Reconnecting...")
+                time.sleep(5)  # Wait before attempting reconnection
+            except Exception as err:
+                print(err)
+                time.sleep(5)  # Wait before attempting reconnection
+
+
+if __name__ == "__main__":
+    consumer = RabbitMQConsumer(queue_name='bc_orders')
+    consumer.start_consuming()
