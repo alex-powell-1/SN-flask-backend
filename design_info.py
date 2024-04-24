@@ -13,7 +13,7 @@ from pika.exceptions import AMQPConnectionError
 from setup import creds, email_engine, sms_engine
 from setup import log_engine
 
-test_mode = True
+test_mode = False
 
 
 class RabbitMQConsumer:

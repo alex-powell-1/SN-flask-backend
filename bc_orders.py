@@ -1,6 +1,6 @@
 import os
 import sys
-import time
+from time import sleep
 from datetime import datetime
 from email import utils
 
@@ -41,6 +41,8 @@ class RabbitMQConsumer:
         # Create order object
         print(f"Beginning processing for Order #{order_id}", file=log_file)
         try:
+            # Give CC Processor time to complete capture of CC info and process
+            sleep(10)
             print(f"Getting Order Details", file=log_file)
             order = Order(order_id)
             # Filter out DECLINED payments
@@ -152,8 +154,10 @@ class RabbitMQConsumer:
                             print(f"Error ({error_type}): {err}", file=log_file)
                         else:
                             print(f"Deleting Barcode - Success at {datetime.now():%H:%M:%S}", file=log_file)
+                # Gift Card Only
                 else:
                     print(f"Skipping Order #{order_id}: Gift Card Only", file=log_file)
+            # Declined Payments
             else:
                 print(f"Skipping Order #{order_id}: Payment Status: {order.payment_status}", file=log_file)
 
@@ -164,7 +168,6 @@ class RabbitMQConsumer:
             ch.basic_ack(delivery_tag=method.delivery_tag)
         finally:
             log_file.close()
-
 
     def start_consuming(self):
         while True:
@@ -177,10 +180,10 @@ class RabbitMQConsumer:
                 sys.exit(0)
             except pika.exceptions.AMQPConnectionError:
                 print("Connection lost. Reconnecting...")
-                time.sleep(5)  # Wait before attempting reconnection
+                sleep(5)  # Wait before attempting reconnection
             except Exception as err:
                 print(err)
-                time.sleep(5)  # Wait before attempting reconnection
+                sleep(5)  # Wait before attempting reconnection
 
 
 if __name__ == "__main__":
