@@ -167,6 +167,7 @@ class RabbitMQConsumer:
         else:
             ch.basic_ack(delivery_tag=method.delivery_tag)
         finally:
+            print(f"Processing Finished at {datetime.now():%H:%M:%S}\n", file=log_file)
             log_file.close()
 
     def start_consuming(self):

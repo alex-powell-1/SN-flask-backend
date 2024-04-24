@@ -169,8 +169,10 @@ class RabbitMQConsumer:
             print(f"Error ({error_type}): {err}", file=log_file)
         else:
             print(f"Sent to Google Sheets at {datetime.now():%H:%M:%S}", file=log_file)
-
+        # Done
+        print(f"Processing Completed at {datetime.now():%H:%M:%S}\n", file=log_file)
         log_file.close()
+        # Send acknowledgement for RabbitMQ to delete from Queue
         ch.basic_ack(delivery_tag=method.delivery_tag)
 
     def start_consuming(self):
