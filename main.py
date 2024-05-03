@@ -1,17 +1,19 @@
 import json
+import time
 import urllib.parse
 from datetime import datetime
 
 import flask
 import pandas
 import pika
-from flask import request
+import requests
+from flask import request, jsonify
 from flask_cors import CORS
 from jinja2 import Template
 from twilio.twiml.messaging_response import MessagingResponse
 from waitress import serve
 
-from setup import creds, email_engine, sms_engine
+from setup import creds, email_engine, sms_engine, authorization
 from setup import log_engine
 
 app = flask.Flask(__name__)
@@ -126,15 +128,20 @@ def incoming_sms():
     """Webhook route for incoming SMS/MMS messages to be used with client messenger application.
     Saves all incoming SMS/MMS messages to share drive csv file."""
     raw_data = request.get_data()
+    print(raw_data)
     # Decode
     string_code = raw_data.decode('utf-8')
     # Parse to dictionary
     msg = urllib.parse.parse_qs(string_code)
 
     date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
     from_phone = msg['From'][0]
     to_phone = msg['To'][0]
-    body = msg['Body'][0]
+    if 'Body' in msg:
+        body = msg['Body'][0]
+    else:
+        body = ""
 
     # Unsubscribe user from SMS marketing
     if body.lower() == "stop":
@@ -142,8 +149,15 @@ def incoming_sms():
 
     # Get MEDIA URL for MMS Messages
     if int(msg['NumMedia'][0]) > 0:
-        media = msg['MediaUrl0'][0]
-        media_url = media[0:8] + creds.twilio_account_sid + ":" + creds.twilio_auth_token + "@" + media[8:]
+        media_url = ""
+
+        for i in range(int(msg['NumMedia'][0])):
+            media_key_index = f'MediaUrl{i}'
+            url = msg[media_key_index][0]
+            if i < (int(msg['NumMedia'][0]) - 1):
+                media_url += (url + ";;;")
+            else:
+                media_url += url
     else:
         media_url = "No Media"
 
@@ -178,7 +192,45 @@ def bc_orders():
                           properties=pika.BasicProperties(delivery_mode=pika.DeliveryMode.Persistent))
     connection.close()
 
-    return json.dumps({'success': True}), 200, {'ContentType': 'application/json'}
+    return jsonify({'success': True}), 200
+
+
+@app.route('/token', methods=['POST'])
+def get_token():
+    password = request.args.get('password')
+
+    if password.lower() == creds.commercial_availability_pw:
+        session = authorization.Session(password)
+        authorization.SESSIONS.append(session)
+        return jsonify({'token': session.token, 'expires': session.expires}), 200
+
+    return jsonify({'error': 'Invalid username or password'}), 401
+
+
+@app.route('/commercialAvailability', methods=['POST'])
+def get_commercial_availability():
+    token = request.args.get('token')
+
+    session = next((s for s in authorization.SESSIONS if s.token == token), None)
+
+    if not session or session.expires < time.time():
+        authorization.SESSIONS = [s for s in authorization.SESSIONS if s.token != token]
+        return jsonify({'error': 'Invalid token'}), 401
+
+    response = requests.get(creds.commercial_availability_url)
+    if response.status_code == 200:
+        return jsonify({'data': response.text}), 200
+    else:
+        return jsonify({'error': 'Error fetching data'}), 500
+
+
+@app.route('/availability', methods=['POST'])
+def get_availability():
+    response = requests.get(creds.retail_availability_url)
+    if response.status_code == 200:
+        return jsonify({'data': response.text}), 200
+    else:
+        return jsonify({'error': 'Error fetching data'}), 500
 
 
 if __name__ == '__main__':

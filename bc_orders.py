@@ -29,7 +29,7 @@ class RabbitMQConsumer:
         self.channel.queue_declare(queue=self.queue_name, durable=True)
 
     def callback(self, ch, method, properties, body):
-        log_file = open(creds.bc_orders_log, "a")
+        log_file = open(creds.create_log(datetime.now(), "order"), "a")
         now = datetime.now()
         order_id = body.decode()
 
@@ -42,7 +42,7 @@ class RabbitMQConsumer:
         print(f"Beginning processing for Order #{order_id}", file=log_file)
         try:
             # Give CC Processor time to complete capture of CC info and process
-            sleep(10)
+            sleep(5)
             print(f"Getting Order Details", file=log_file)
             order = Order(order_id)
             # Filter out DECLINED payments
