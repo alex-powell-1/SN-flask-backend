@@ -144,35 +144,40 @@ def incoming_sms():
         body = ""
 
     # Unsubscribe user from SMS marketing
-    if body.lower() == "stop":
+    if body.lower() in ["stop", "unsubscribe", "stop please", "please stop", "cancel", "opt out", "remove me"]:
         sms_engine.unsubscribe_from_sms(from_phone)
+        # Return Response to Twilio
+        resp = MessagingResponse()
+        return str(resp)
 
-    # Get MEDIA URL for MMS Messages
-    if int(msg['NumMedia'][0]) > 0:
-        media_url = ""
-
-        for i in range(int(msg['NumMedia'][0])):
-            media_key_index = f'MediaUrl{i}'
-            url = msg[media_key_index][0]
-            if i < (int(msg['NumMedia'][0]) - 1):
-                media_url += (url + ";;;")
-            else:
-                media_url += url
     else:
-        media_url = "No Media"
+        # Get MEDIA URL for MMS Messages
+        if int(msg['NumMedia'][0]) > 0:
+            media_url = ""
 
-    # Get Customer Name and Category from SQL
-    full_name, category = sms_engine.lookup_customer_data(sms_engine.format_phone(from_phone, mode="counterpoint"))
+            for i in range(int(msg['NumMedia'][0])):
+                media_key_index = f'MediaUrl{i}'
+                url = msg[media_key_index][0]
+                if i < (int(msg['NumMedia'][0]) - 1):
+                    # Add separator per front-end request.
+                    media_url += (url + ";;;")
+                else:
+                    media_url += url
+        else:
+            media_url = "No Media"
 
-    log_data = [[date, to_phone, from_phone, body, full_name, category.title(), media_url]]
+        # Get Customer Name and Category from SQL
+        full_name, category = sms_engine.lookup_customer_data(sms_engine.format_phone(from_phone, mode="counterpoint"))
 
-    # Write dataframe to CSV file
-    df = pandas.DataFrame(log_data, columns=["date", "to_phone", "from_phone", "body", "name", "category", "media"])
-    log_engine.write_log(df, creds.incoming_sms_log)
+        log_data = [[date, to_phone, from_phone, body, full_name, category.title(), media_url]]
 
-    # Return Response to Twilio
-    resp = MessagingResponse()
-    return str(resp)
+        # Write dataframe to CSV file
+        df = pandas.DataFrame(log_data, columns=["date", "to_phone", "from_phone", "body", "name", "category", "media"])
+        log_engine.write_log(df, creds.incoming_sms_log)
+
+        # Return Response to Twilio
+        resp = MessagingResponse()
+        return str(resp)
 
 
 @app.route('/bc', methods=['POST'])
