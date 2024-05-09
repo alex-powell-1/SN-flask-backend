@@ -32,6 +32,16 @@ This endpoint is used to get retail availability data.
 ## Running the Application
 The application can be run in development mode by setting the `dev` variable to `True`. In this mode, the application is served by Flask's built-in server. If `dev` is `False`, the application is served by the Waitress WSGI server.
 
+## Recent Improvements
+
+1. **Input Validation**: The application now uses JSON Schema to validate the incoming data in the routes. This helps to ensure that the data is in the expected format and can help to prevent issues such as injection attacks.
+
+2. **Rate Limiting**: The application now uses Flask-Limiter to limit the number of requests that can be made to the endpoints per minute. This can help to protect against brute-force attacks or denial-of-service attacks.
+
+3. **Data Sanitization**: The application now uses the `bleach` library to sanitize the input data. This can help to prevent security threats like Cross-Site Scripting (XSS) or Command Injection attacks.
+
+4. **Error Handling**: The application now has error handling functions in place to handle `ValidationError` and `Exception`. This can prevent any sensitive information leakage through error messages.
+
 ## Testing
 The application has a `test_mode` variable. When `True`, it disables SMS text and automatic printing in the office.
 

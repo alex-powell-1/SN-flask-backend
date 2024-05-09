@@ -7,11 +7,15 @@ import flask
 import pandas
 import pika
 import requests
-from flask import request, jsonify
+from flask import request, jsonify, abort
 from flask_cors import CORS
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 from jinja2 import Template
+from jsonschema import validate, ValidationError
 from twilio.twiml.messaging_response import MessagingResponse
 from waitress import serve
+import bleach
 
 from setup import creds, email_engine, sms_engine, authorization
 from setup import log_engine
@@ -25,105 +29,154 @@ dev = False
 # When True, disables sms text and automatic printing in office
 test_mode = False
 
+# Initialize the rate limiter
+limiter = Limiter(app=app, key_func=get_remote_address)
+
+
+# Error handling functions
+@app.errorhandler(ValidationError)
+def handle_validation_error(e):
+    # Return a JSON response with a message indicating that the input data is invalid
+    return jsonify({'error': 'Invalid input data', 'message': str(e)}), 400
+
+
+@app.errorhandler(Exception)
+def handle_exception(e):
+    # Return a JSON response with a generic error message
+    return jsonify({'error': 'An error occurred', 'message': str(e)}), 500
+
 
 @app.route('/design', methods=["POST"])
+@limiter.limit("10/minute")  # 10 requests per minute
 def get_service_information():
     """Route for information request about company service. Sends JSON to RabbitMQ for asynchronous processing."""
+
     data = request.json
-    payload = json.dumps(data)
-    connection = pika.BlockingConnection(pika.ConnectionParameters('localhost'))
-    channel = connection.channel()
-    channel.queue_declare(queue='design_info', durable=True)
 
-    channel.basic_publish(exchange='',
-                          routing_key='design_info',
-                          body=payload,
-                          properties=pika.BasicProperties(delivery_mode=pika.DeliveryMode.Persistent))
-    connection.close()
+    # Sanitize the input data
+    sanitized_data = {k: bleach.clean(v) for k, v in data.items()}
 
-    return "Your information has been received. Please check your email for more information from our team."
+    # Validate the input data
+    try:
+        validate(instance=sanitized_data, schema=creds.design_schema)
+    except ValidationError as e:
+        abort(400, description=e.message)
+    else:
+        payload = json.dumps(sanitized_data)
+        connection = pika.BlockingConnection(pika.ConnectionParameters('localhost'))
+        channel = connection.channel()
+        channel.queue_declare(queue='design_info', durable=True)
+
+        channel.basic_publish(exchange='',
+                              routing_key='design_info',
+                              body=payload,
+                              properties=pika.BasicProperties(delivery_mode=pika.DeliveryMode.Persistent))
+        connection.close()
+
+        return "Your information has been received. Please check your email for more information from our team."
 
 
 @app.route('/stock_notify', methods=['POST'])
+@limiter.limit("10/minute")  # 10 requests per minute
 def stock_notification():
     """Get contact and product information from user who wants notification of when
     a product comes back into stock."""
     data = request.json
-    email = data.get('email')
-    item_no = data.get('sku')
-    try:
-        df = pandas.read_csv(creds.stock_notification_log)
-    except FileNotFoundError:
-        pass
-    else:
-        entries = df.to_dict("records")
-        for x in entries:
-            if x['email'] == email and str(x['item_no']) == item_no:
-                return ("This email address is already on file for this item. We will send you an email "
-                        "when it comes back in stock. Please contact our office at "
-                        "<a href='tel:8288740679'>(828) 874-0679</a> if you need an alternative "
-                        "item. Thank you!"), 400
+    # Sanitize the input data
+    sanitized_data = {k: bleach.clean(v) for k, v in data.items()}
 
-    stock_notification_data = [[str(datetime.now())[:-7], email, item_no]]
-    df = pandas.DataFrame(stock_notification_data, columns=["date", "email", str("item_no")])
-    log_engine.write_log(df, creds.stock_notification_log)
-    return "Your submission was received."
+    # Validate the input data
+    try:
+        validate(instance=sanitized_data, schema=creds.stock_notification_schema)
+    except ValidationError as e:
+        abort(400, description=e.message)
+    else:
+        email = sanitized_data.get('email')
+        item_no = sanitized_data.get('sku')
+        try:
+            df = pandas.read_csv(creds.stock_notification_log)
+        except FileNotFoundError:
+            pass
+        else:
+            entries = df.to_dict("records")
+            for x in entries:
+                if x['email'] == email and str(x['item_no']) == item_no:
+                    return ("This email address is already on file for this item. We will send you an email "
+                            "when it comes back in stock. Please contact our office at "
+                            "<a href='tel:8288740679'>(828) 874-0679</a> if you need an alternative "
+                            "item. Thank you!"), 400
+
+        stock_notification_data = [[str(datetime.now())[:-7], email, item_no]]
+        df = pandas.DataFrame(stock_notification_data, columns=["date", "email", str("item_no")])
+        log_engine.write_log(df, creds.stock_notification_log)
+        return "Your submission was received."
 
 
 @app.route('/newsletter', methods=['POST'])
+@limiter.limit("20/minute")  # 20 requests per minute
 def newsletter_signup():
     """Route for website pop-up. Offers user a coupon and adds their information to a csv."""
     data = request.json
-    email = data.get('email')
+
+    # Sanitize the input data
+    sanitized_data = {k: bleach.clean(v) for k, v in data.items()}
+    # Validate the input data
     try:
-        df = pandas.read_csv(creds.newsletter_log)
-    except FileNotFoundError:
-        print("Coupon File Not Found")
+        validate(instance=sanitized_data, schema=creds.newsletter_schema)
+    except ValidationError as e:
+        abort(400, description=e.message)
     else:
-        entries = df.to_dict("records")
-        for x in entries:
-            if x['email'] == email:
-                print(f"{email} is already on file")
-                return "This email address is already on file.", 400
+        email = data.get('email')
+        try:
+            df = pandas.read_csv(creds.newsletter_log)
+        except FileNotFoundError:
+            print("Coupon File Not Found")
+        else:
+            entries = df.to_dict("records")
+            for x in entries:
+                if x['email'] == email:
+                    print(f"{email} is already on file")
+                    return "This email address is already on file.", 400
 
-    recipient = {"": email}
-    with open("./templates/new10.html", "r") as file:
-        template_str = file.read()
+        recipient = {"": email}
+        with open("./templates/new10.html", "r") as file:
+            template_str = file.read()
 
-    jinja_template = Template(template_str)
+        jinja_template = Template(template_str)
 
-    email_data = {
-        "title": f"Welcome to {creds.company_name}",
-        "greeting": f"Hi!",
-        "service": creds.service,
-        "coupon": "NEW10",
-        "company": creds.company_name,
-        "list_items": creds.list_items,
-        "signature_name": creds.signature_name,
-        "signature_title": creds.signature_title,
-        "company_phone": creds.company_phone,
-        "company_url": creds.company_url,
-        "company_reviews": creds.company_reviews
-    }
+        email_data = {
+            "title": f"Welcome to {creds.company_name}",
+            "greeting": f"Hi!",
+            "service": creds.service,
+            "coupon": "NEW10",
+            "company": creds.company_name,
+            "list_items": creds.list_items,
+            "signature_name": creds.signature_name,
+            "signature_title": creds.signature_title,
+            "company_phone": creds.company_phone,
+            "company_url": creds.company_url,
+            "company_reviews": creds.company_reviews
+        }
 
-    email_content = jinja_template.render(email_data)
+        email_content = jinja_template.render(email_data)
 
-    email_engine.send_html_email(from_name=creds.company_name,
-                                 from_address=creds.gmail_user,
-                                 recipients_list=recipient,
-                                 subject=f"Welcome to {creds.company_name}! Coupon Inside!",
-                                 content=email_content,
-                                 mode='related',
-                                 logo=True,
-                                 attachment=False)
+        email_engine.send_html_email(from_name=creds.company_name,
+                                     from_address=creds.gmail_user,
+                                     recipients_list=recipient,
+                                     subject=f"Welcome to {creds.company_name}! Coupon Inside!",
+                                     content=email_content,
+                                     mode='related',
+                                     logo=True,
+                                     attachment=False)
 
-    newsletter_data = [[str(datetime.now())[:-7], email]]
-    df = pandas.DataFrame(newsletter_data, columns=["date", "email"])
-    log_engine.write_log(df, creds.newsletter_log)
-    return "OK", 200
+        newsletter_data = [[str(datetime.now())[:-7], email]]
+        df = pandas.DataFrame(newsletter_data, columns=["date", "email"])
+        log_engine.write_log(df, creds.newsletter_log)
+        return "OK", 200
 
 
 @app.route('/sms', methods=['POST'])
+@limiter.limit("30/minute")  # 10 requests per minute
 def incoming_sms():
     """Webhook route for incoming SMS/MMS messages to be used with client messenger application.
     Saves all incoming SMS/MMS messages to share drive csv file."""
@@ -181,6 +234,7 @@ def incoming_sms():
 
 
 @app.route('/bc', methods=['POST'])
+@limiter.limit("10/minute")  # 10 requests per minute
 def bc_orders():
     """Webhook route for incoming orders. Sends to RabbitMQ queue for asynchronous processing"""
     response_data = request.get_json()
@@ -201,6 +255,7 @@ def bc_orders():
 
 
 @app.route('/token', methods=['POST'])
+@limiter.limit("10/minute")  # 10 requests per minute
 def get_token():
     password = request.args.get('password')
 
@@ -213,6 +268,7 @@ def get_token():
 
 
 @app.route('/commercialAvailability', methods=['POST'])
+@limiter.limit("10/minute")  # 10 requests per minute
 def get_commercial_availability():
     token = request.args.get('token')
 
@@ -230,6 +286,7 @@ def get_commercial_availability():
 
 
 @app.route('/availability', methods=['POST'])
+@limiter.limit("10/minute")  # 10 requests per minute
 def get_availability():
     response = requests.get(creds.retail_availability_url)
     if response.status_code == 200:
