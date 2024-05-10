@@ -21,6 +21,9 @@ from setup import creds, email_engine, sms_engine, authorization
 from setup import log_engine
 
 app = flask.Flask(__name__)
+
+limiter = Limiter(get_remote_address, app=app)
+
 CORS(app)
 
 # When False, app is served by Waitress
@@ -28,9 +31,6 @@ dev = False
 
 # When True, disables sms text and automatic printing in office
 test_mode = False
-
-# Initialize the rate limiter
-limiter = Limiter(app=app, key_func=get_remote_address)
 
 
 # Error handling functions
@@ -47,7 +47,7 @@ def handle_exception(e):
 
 
 @app.route('/design', methods=["POST"])
-@limiter.limit("10/minute")  # 10 requests per minute
+@limiter.limit("20/minute")  # 10 requests per minute
 def get_service_information():
     """Route for information request about company service. Sends JSON to RabbitMQ for asynchronous processing."""
 
@@ -77,7 +77,7 @@ def get_service_information():
 
 
 @app.route('/stock_notify', methods=['POST'])
-@limiter.limit("10/minute")  # 10 requests per minute
+@limiter.limit("20/minute")  # 10 requests per minute
 def stock_notification():
     """Get contact and product information from user who wants notification of when
     a product comes back into stock."""
@@ -113,13 +113,15 @@ def stock_notification():
 
 
 @app.route('/newsletter', methods=['POST'])
-@limiter.limit("20/minute")  # 20 requests per minute
+@limiter.limit("20 per minute")  # 20 requests per minute
 def newsletter_signup():
     """Route for website pop-up. Offers user a coupon and adds their information to a csv."""
     data = request.json
+    print(data)
 
     # Sanitize the input data
     sanitized_data = {k: bleach.clean(v) for k, v in data.items()}
+    print(sanitized_data)
     # Validate the input data
     try:
         validate(instance=sanitized_data, schema=creds.newsletter_schema)
@@ -176,7 +178,7 @@ def newsletter_signup():
 
 
 @app.route('/sms', methods=['POST'])
-@limiter.limit("30/minute")  # 10 requests per minute
+@limiter.limit("40/minute")  # 10 requests per minute
 def incoming_sms():
     """Webhook route for incoming SMS/MMS messages to be used with client messenger application.
     Saves all incoming SMS/MMS messages to share drive csv file."""
@@ -234,7 +236,7 @@ def incoming_sms():
 
 
 @app.route('/bc', methods=['POST'])
-@limiter.limit("10/minute")  # 10 requests per minute
+@limiter.limit("20/minute")  # 10 requests per minute
 def bc_orders():
     """Webhook route for incoming orders. Sends to RabbitMQ queue for asynchronous processing"""
     response_data = request.get_json()

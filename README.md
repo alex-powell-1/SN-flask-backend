@@ -1,12 +1,18 @@
 # Flask Application Documentation
 
 ## Overview
-This Flask application provides several API endpoints for different functionalities including handling incoming orders, sending information to RabbitMQ for asynchronous processing, handling incoming SMS/MMS messages, and more.
+This Flask application provides several API endpoints for different functionalities including handling incoming orders, sending information to RabbitMQ for asynchronous processing, handling incoming SMS/MMS messages, 
+automatically printing incoming orders and more. Security features such as input validation, rate limiting, data sanitization, and error handling have been implemented to protect the application from security threats.
+
 
 ## API Endpoints
 
 ### 1. `/design` (POST)
-This endpoint is used to get information about the company service. It sends the received JSON data to a RabbitMQ queue for asynchronous processing.
+This endpoint is used to get information about the company design service. 
+It sends the received JSON data to a RabbitMQ queue (`design_info.py`) for asynchronous processing.
+Processing includes sending an email to the user, texting sales team manager, rendering a in-store
+Word document, printing it, and saving the data to a shared drive CSV file.
+
 
 ### 2. `/stock_notify` (POST)
 This endpoint is used to get contact and product information from a user who wants notification of when a product comes back into stock.
@@ -18,7 +24,7 @@ This endpoint is used for website pop-up. It offers the user a coupon and adds t
 This endpoint is a webhook route for incoming SMS/MMS messages to be used with a client messenger application. It saves all incoming SMS/MMS messages to a shared drive CSV file.
 
 ### 5. `/bc` (POST)
-This endpoint is a webhook route for incoming orders. It sends the order ID to a RabbitMQ queue for asynchronous processing.
+This endpoint is a webhook route for incoming orders. It sends the order ID to a RabbitMQ queue (`bc_orders.py`) for asynchronous processing.
 
 ### 6. `/token` (POST)
 This endpoint is used to get a token for a session. The password is passed as a query parameter.
