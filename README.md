@@ -1,4 +1,4 @@
-# Flask Application Documentation
+# Documentation
 
 ## Overview
 This Flask application provides several API endpoints for different functionalities including handling incoming orders, sending information to RabbitMQ for asynchronous processing, handling incoming SMS/MMS messages, 
