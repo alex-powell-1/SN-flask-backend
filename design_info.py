@@ -185,13 +185,13 @@ class RabbitMQConsumer:
             except KeyboardInterrupt:
                 sys.exit(0)
             except pika.exceptions.AMQPConnectionError:
-                print("Connection lost. Reconnecting...")
+                print("Connection lost. Reconnecting...", file=creds.lead_error_log)
                 time.sleep(5)  # Wait before attempting reconnection
             except Exception as err:
-                print(err)
+                print(err, file=creds.lead_error_log)
                 time.sleep(5)  # Wait before attempting reconnection
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     consumer = RabbitMQConsumer(queue_name='design_info')
     consumer.start_consuming()

@@ -2,7 +2,9 @@ import json
 import time
 import urllib.parse
 from datetime import datetime
+from functools import wraps
 
+import bleach
 import flask
 import pandas
 import pika
@@ -15,12 +17,12 @@ from jinja2 import Template
 from jsonschema import validate, ValidationError
 from twilio.twiml.messaging_response import MessagingResponse
 from waitress import serve
-import bleach
 
 from setup import creds, email_engine, sms_engine, authorization
 from setup import log_engine
 
 app = flask.Flask(__name__)
+# app.config['SECRET_KEY'] = creds.secret_key
 
 limiter = Limiter(get_remote_address, app=app)
 
@@ -50,21 +52,18 @@ def handle_exception(e):
 @limiter.limit("20/minute")  # 10 requests per minute
 def get_service_information():
     """Route for information request about company service. Sends JSON to RabbitMQ for asynchronous processing."""
-
     data = request.json
-
-    # Sanitize the input data
-    sanitized_data = {k: bleach.clean(v) for k, v in data.items()}
-
-    # Validate the input data
+    # # Validate the input data
     try:
-        validate(instance=sanitized_data, schema=creds.design_schema)
+        validate(instance=data, schema=creds.design_schema)
     except ValidationError as e:
         abort(400, description=e.message)
     else:
-        payload = json.dumps(sanitized_data)
+        payload = json.dumps(data)
         connection = pika.BlockingConnection(pika.ConnectionParameters('localhost'))
+
         channel = connection.channel()
+
         channel.queue_declare(queue='design_info', durable=True)
 
         channel.basic_publish(exchange='',
@@ -240,6 +239,7 @@ def incoming_sms():
 def bc_orders():
     """Webhook route for incoming orders. Sends to RabbitMQ queue for asynchronous processing"""
     response_data = request.get_json()
+    print(response_data)
     order_id = response_data['data']['id']
 
     connection = pika.BlockingConnection(pika.ConnectionParameters('localhost'))
@@ -295,6 +295,12 @@ def get_availability():
         return jsonify({'data': response.text}), 200
     else:
         return jsonify({'error': 'Error fetching data'}), 500
+
+
+@app.route('/health', methods=['GET'])
+@limiter.limit("10/minute")  # 10 requests per minute
+def health_check():
+    return jsonify({'status': 'Server is running'}), 200
 
 
 if __name__ == '__main__':
