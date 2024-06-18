@@ -2,7 +2,6 @@ import json
 import time
 import urllib.parse
 from datetime import datetime
-from functools import wraps
 
 import bleach
 import flask
@@ -22,7 +21,6 @@ from setup import creds, email_engine, sms_engine, authorization
 from setup import log_engine
 
 app = flask.Flask(__name__)
-# app.config['SECRET_KEY'] = creds.secret_key
 
 limiter = Limiter(get_remote_address, app=app)
 
@@ -30,9 +28,6 @@ CORS(app)
 
 # When False, app is served by Waitress
 dev = False
-
-# When True, disables sms text and automatic printing in office
-test_mode = False
 
 
 # Error handling functions
@@ -45,6 +40,7 @@ def handle_validation_error(e):
 @app.errorhandler(Exception)
 def handle_exception(e):
     # Return a JSON response with a generic error message
+    print(str(e), file=creds.flask_error_log)
     return jsonify({'error': 'An error occurred', 'message': str(e)}), 500
 
 

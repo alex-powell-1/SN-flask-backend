@@ -1,0 +1,12 @@
+.idea/
+attachments/
+delivery_sandbox.py
+images/
+lead_05_13_24_16_05_18.docx
+nssm-2.24/
+nssm.exe
+readme.txt
+ruff.toml
+setup/__pycache__/
+setup/creds.py
+test.py
